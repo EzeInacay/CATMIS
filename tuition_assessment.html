@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Tuition Assessment | CATMIS</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+/* ===== GLOBAL ===== */
+body { margin:0; font-family:Arial; background:#eef1f4; }
+.sidebar {
+    width:250px; height:100vh; position:fixed;
+    background:linear-gradient(to bottom,#0f2027,#203a43);
+    color:white; display:flex; flex-direction:column;
+}
+.sidebar-header { padding:25px; border-bottom:1px solid rgba(255,255,255,.1); }
+.sidebar ul { list-style:none; padding:0; margin:20px 0; }
+.sidebar ul li { padding:12px 25px; }
+.sidebar ul li a { color:white; text-decoration:none; display:block; }
+.sidebar ul li:hover { background:rgba(255,255,255,.1); }
+.active { background:rgba(255,255,255,.15); }
+.logout-btn { background:#ff3b30; border:none; color:white; padding:12px; width:100%; cursor:pointer; margin-top:auto; }
+.main { margin-left:250px; padding:40px; }
+
+.card {
+    background:white; padding:25px;
+    border-radius:12px;
+    box-shadow:0 4px 10px rgba(0,0,0,.05);
+    margin-bottom:30px;
+}
+input, select {
+    padding:10px; width:100%;
+    margin-bottom:15px;
+}
+button.primary {
+    background:#0077b6; color:white;
+    border:none; padding:10px 15px;
+    border-radius:6px; cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<div class="sidebar">
+    <div class="sidebar-header">
+        <h2>CATMIS</h2>
+        <p>CCS Portal</p>
+    </div>
+    <ul>
+        <li><a href="admin_dashboard.html">🏠 Admin Dashboard</a></li>
+        <li class="active"><a href="#">📂 Tuition Assessment</a></li>
+        <li><a href="user_management.html">👥 User Management</a></li>
+        <li><a href="payment_history.html">📄 Payment History</a></li>
+        <li><a href="audit_logs.html">🕒 Audit Logs</a></li>
+    </ul>
+    <button class="logout-btn" onclick="logout()">Logout</button>
+</div>
+
+<div class="main">
+    <h2>Tuition Assessment</h2>
+
+    <div class="card">
+        <h3>Create Assessment</h3>
+        <input type="text" placeholder="Student Name">
+        <select>
+            <option>Select Section</option>
+            <option>ABM-A</option>
+            <option>STEM-A</option>
+        </select>
+        <input type="number" placeholder="Total Tuition Amount">
+        <button class="primary">Save Assessment</button>
+    </div>
+</div>
+
+<script>
+if (localStorage.getItem("role") !== "admin") {
+    window.location.href = "login.html";
+}
+function logout() {
+    localStorage.removeItem("role");
+    window.location.href = "login.html";
+}
+</script>
+
+</body>
+</html>
