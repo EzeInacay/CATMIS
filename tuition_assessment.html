@@ -93,8 +93,6 @@ let tuitionData = JSON.parse(localStorage.getItem("tuitionData")) || {
     "G11-12": []
 };    
 
-
-
 let tuitionRules = JSON.parse(localStorage.getItem("tuitionRules")) || [
     { grade: "10", section: "", amount: 20000 },
     { grade: "11", section: "STEM-A", amount: 30000 },
@@ -108,88 +106,146 @@ container.innerHTML = "";
 
 Object.keys(tuitionData).forEach(group => {
 
-let table = document.createElement("table");
+let groupDiv = document.createElement("div");
+groupDiv.innerHTML = `<h3>${group}</h3>`;
 
+tuitionData[group].forEach((entry, index) => {
+
+let table = document.createElement("table");
 table.style.marginBottom = "20px";
 
-table.innerHTML = `
-<thead>
+let rowsHTML = "";
+
+// render fees vertically
+entry.fees.forEach((fee, feeIndex) => {
+
+rowsHTML += `
 <tr>
-<th colspan="12">${group}</th>
-</tr>
-<tr>
-<th>Section</th>
-<th>Tuition</th>
-<th>Reg</th>
-<th>Testing</th>
-<th>Instr</th>
-<th>Membership</th>
-<th>Lunch</th>
-<th>Athletics</th>
-<th>Library</th>
-<th>Energy</th>
-<th>Total</th>
-<th>Action</th>
-</tr>
-</thead>
-<tbody></tbody>
-`;
-
-container.appendChild(table);
-
-let tbody = table.querySelector("tbody");
-
-tuitionData[group].forEach((row, index) => {
-
-let total = calculateTotal(row);
-
-let tr = tbody.insertRow();
-
-tr.innerHTML = `
-<td contenteditable="true">${row.section}</td>
-<td contenteditable="true">${row.tuition}</td>
-<td contenteditable="true">${row.registration}</td>
-<td contenteditable="true">${row.testing}</td>
-<td contenteditable="true">${row.instructional}</td>
-<td contenteditable="true">${row.membership}</td>
-<td contenteditable="true">${row.lunch}</td>
-<td contenteditable="true">${row.athletics}</td>
-<td contenteditable="true">${row.library}</td>
-<td contenteditable="true">${row.energy}</td>
-<td>${total}</td>
+<td contenteditable="true">${fee.name}</td>
+<td contenteditable="true">${fee.amount}</td>
 <td>
-<button onclick="saveRow('${group}', ${index}, this)">💾</button>
-<button onclick="deleteRow('${group}', ${index})">🗑</button>
+<button onclick="saveFee('${group}', ${index}, ${feeIndex}, this)">💾</button>
+<button onclick="deleteFee('${group}', ${index}, ${feeIndex})">🗑</button>
 </td>
+</tr>
 `;
 
 });
 
-// ✅ ADD BUTTON PER TABLE (correct placement)
-let addBtn = document.createElement("button");
-addBtn.textContent = `➕ Add Row (${group})`;
-addBtn.className = "primary";
-addBtn.style.marginBottom = "30px";
-addBtn.onclick = () => addRow(group);
+let total = calculateTotal(entry.fees);
 
-container.appendChild(addBtn);
+table.innerHTML = `
+<thead>
+<tr>
+<th colspan="3">${entry.section || "General"}</th>
+</tr>
+<tr>
+<th>Fee Type</th>
+<th>Amount</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+${rowsHTML}
+<tr>
+<td><strong>TOTAL</strong></td>
+<td><strong>${total}</strong></td>
+<td></td>
+</tr>
+</tbody>
+`;
+
+groupDiv.appendChild(table);
+
+// ➕ Add Fee Button
+let addFeeBtn = document.createElement("button");
+addFeeBtn.textContent = "➕ Add Fee";
+addFeeBtn.className = "primary";
+addFeeBtn.onclick = () => addFee(group, index);
+
+groupDiv.appendChild(addFeeBtn);
+
+});
+
+// ➕ Add Section (for SHS or grouping)
+let addSectionBtn = document.createElement("button");
+addSectionBtn.textContent = `➕ Add Section (${group})`;
+addSectionBtn.className = "primary";
+addSectionBtn.style.marginBottom = "30px";
+
+addSectionBtn.onclick = () => addSection(group);
+
+groupDiv.appendChild(addSectionBtn);
+
+container.appendChild(groupDiv);
 
 });
 
 }
 
-function calculateTotal(row){
-return (
-    Number(row.tuition) +
-    Number(row.registration) +
-    Number(row.testing) +
-    Number(row.instructional) +
-    Number(row.membership) +
-    Number(row.lunch) +
-    Number(row.athletics) +
-    Number(row.library) +
-    Number(row.energy)
-);
+function calculateTotal(fees){
+return fees.reduce((sum, f) => sum + Number(f.amount || 0), 0);
+}
+
+function addSection(group){
+
+let section = prompt("Enter Section/Track (leave blank if none):");
+
+tuitionData[group].push({
+    section: section ? section.toUpperCase() : "",
+    fees: [
+        { name: "Tuition", amount: 0 },
+        { name: "Registration Fee", amount: 0 }
+    ]
+});
+
+saveData();
+renderTables();
+
+}
+
+function addFee(group, index){
+
+let feeName = prompt("Enter Fee Name (e.g. Laboratory):");
+if(!feeName) return;
+
+let amount = prompt("Enter Amount:");
+if(!amount || isNaN(amount)) return;
+
+tuitionData[group][index].fees.push({
+    name: feeName,
+    amount: Number(amount)
+});
+
+saveData();
+renderTables();
+
+}
+
+function deleteFee(group, entryIndex, feeIndex){
+
+if(confirm("Delete this fee?")){
+    tuitionData[group][entryIndex].fees.splice(feeIndex,1);
+    saveData();
+    renderTables();
+}
+
+}
+
+function saveFee(group, entryIndex, feeIndex, btn){
+
+let row = btn.parentNode.parentNode;
+let name = row.cells[0].textContent.trim();
+let amount = Number(row.cells[1].textContent);
+
+tuitionData[group][entryIndex].fees[feeIndex] = {
+    name: name,
+    amount: amount
+};
+
+saveData();
+renderTables();
+
 }
 
 function saveRow(group, index, btn){
@@ -331,9 +387,7 @@ function saveData(){
 localStorage.setItem("tuitionData", JSON.stringify(tuitionData));
 }
 
-window.onload = function(){
-    renderTables();
-};
+window.onload = renderTables;
 </script>
 
 </body>
