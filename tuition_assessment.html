@@ -61,19 +61,76 @@ button.primary {
     <h2>Tuition Assessment</h2>
 
     <div class="card">
-        <h3>Create Assessment</h3>
-        <input type="text" placeholder="Student Name">
-        <select>
-            <option>Select Section</option>
-            <option>ABM-A</option>
-            <option>STEM-A</option>
-        </select>
-        <input type="number" placeholder="Total Tuition Amount">
-        <button class="primary">Save Assessment</button>
-    </div>
-</div>
+    <h3>Set Tuition Rule</h3>
 
+    <select id="grade">
+        <option value="">Select Grade</option>
+        <option value="10">Grade 10</option>
+        <option value="11">Grade 11</option>
+        <option value="12">Grade 12</option>
+    </select>
+
+    <input type="text" id="section" placeholder="Section / Track (e.g. STEM-A, ABM-B)">
+
+    <input type="number" id="amount" placeholder="Tuition Amount">
+
+    <button class="primary" onclick="saveTuition()">Save Rule</button>
+</div>
 <script>
+let tuitionRules = JSON.parse(localStorage.getItem("tuitionRules")) || [];
+
+function saveTuition(){
+
+let grade = document.getElementById("grade").value;
+let section = document.getElementById("section").value.trim();
+let amount = document.getElementById("amount").value;
+
+if(!grade || !amount){
+    alert("Please complete required fields");
+    return;
+}
+
+let rule = {
+    grade: grade,
+    section: section.toUpperCase(),
+    amount: parseFloat(amount)
+};
+
+// remove duplicate rule (same grade + section)
+tuitionRules = tuitionRules.filter(r =>
+    !(r.grade === grade && r.section === rule.section)
+);
+
+tuitionRules.push(rule);
+
+localStorage.setItem("tuitionRules", JSON.stringify(tuitionRules));
+
+alert("Tuition rule saved!");
+
+}
+
+function getTuition(grade, section){
+
+// priority: exact match (grade + section)
+let exact = tuitionRules.find(r =>
+    r.grade === grade &&
+    r.section === section.toUpperCase()
+);
+
+if(exact) return exact.amount;
+
+// fallback: grade-only rule
+let gradeOnly = tuitionRules.find(r =>
+    r.grade === grade && r.section === ""
+);
+
+if(gradeOnly) return gradeOnly.amount;
+
+// default fallback
+return 0;
+
+}
+
 if (localStorage.getItem("role") !== "admin") {
     window.location.href = "login.html";
 }
