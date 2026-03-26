@@ -37,6 +37,24 @@ button.primary {
     border:none; padding:10px 15px;
     border-radius:6px; cursor:pointer;
 }
+table {
+    width:100%;
+    border-collapse:collapse;
+    background:white;
+    border-radius:10px;
+    overflow:hidden;
+    box-shadow:0 4px 10px rgba(0,0,0,.05);
+}
+
+th, td {
+    padding:10px;
+    border-bottom:1px solid #eee;
+    text-align:center;
+}
+
+th {
+    background:#f2f4f7;
+}
 </style>
 </head>
 
@@ -61,26 +79,193 @@ button.primary {
     <h2>Tuition Assessment</h2>
 
     <div class="card">
-    <h3>Set Tuition Rule</h3>
-
-    <select id="grade">
-        <option value="">Select Grade</option>
-        <option value="10">Grade 10</option>
-        <option value="11">Grade 11</option>
-        <option value="12">Grade 12</option>
-    </select>
-
-    <input type="text" id="section" placeholder="Section / Track (e.g. STEM-A, ABM-B)">
-
-    <input type="number" id="amount" placeholder="Tuition Amount">
-
-    <button class="primary" onclick="saveTuition()">Save Rule</button>
+        <h3>Tuition Matrix</h3>
+        <div id="tuitionContainer"></div>
     </div>
 </div>
 
 
 <script>
-let tuitionRules = JSON.parse(localStorage.getItem("tuitionRules")) || [];
+let tuitionData = JSON.parse(localStorage.getItem("tuitionData")) || {
+    "G1-3": [],
+    "G4-6": [],
+    "G7-10": [],
+    "G11-12": []
+};    
+
+
+
+let tuitionRules = JSON.parse(localStorage.getItem("tuitionRules")) || [
+    { grade: "10", section: "", amount: 20000 },
+    { grade: "11", section: "STEM-A", amount: 30000 },
+    { grade: "11", section: "ABM-B", amount: 28000 }
+];
+
+function renderTables(){
+
+let container = document.getElementById("tuitionContainer");
+container.innerHTML = "";
+
+Object.keys(tuitionData).forEach(group => {
+
+let table = document.createElement("table");
+
+table.style.marginBottom = "20px";
+
+table.innerHTML = `
+<thead>
+<tr>
+<th colspan="12">${group}</th>
+</tr>
+<tr>
+<th>Section</th>
+<th>Tuition</th>
+<th>Reg</th>
+<th>Testing</th>
+<th>Instr</th>
+<th>Membership</th>
+<th>Lunch</th>
+<th>Athletics</th>
+<th>Library</th>
+<th>Energy</th>
+<th>Total</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody></tbody>
+`;
+
+container.appendChild(table);
+
+let tbody = table.querySelector("tbody");
+
+tuitionData[group].forEach((row, index) => {
+
+let total = calculateTotal(row);
+
+let tr = tbody.insertRow();
+
+tr.innerHTML = `
+<td contenteditable="true">${row.section}</td>
+<td contenteditable="true">${row.tuition}</td>
+<td contenteditable="true">${row.registration}</td>
+<td contenteditable="true">${row.testing}</td>
+<td contenteditable="true">${row.instructional}</td>
+<td contenteditable="true">${row.membership}</td>
+<td contenteditable="true">${row.lunch}</td>
+<td contenteditable="true">${row.athletics}</td>
+<td contenteditable="true">${row.library}</td>
+<td contenteditable="true">${row.energy}</td>
+<td>${total}</td>
+<td>
+<button onclick="saveRow('${group}', ${index}, this)">💾</button>
+<button onclick="deleteRow('${group}', ${index})">🗑</button>
+</td>
+`;
+
+});
+
+// ✅ ADD BUTTON PER TABLE (correct placement)
+let addBtn = document.createElement("button");
+addBtn.textContent = `➕ Add Row (${group})`;
+addBtn.className = "primary";
+addBtn.style.marginBottom = "30px";
+addBtn.onclick = () => addRow(group);
+
+container.appendChild(addBtn);
+
+});
+
+}
+
+function calculateTotal(row){
+return (
+    Number(row.tuition) +
+    Number(row.registration) +
+    Number(row.testing) +
+    Number(row.instructional) +
+    Number(row.membership) +
+    Number(row.lunch) +
+    Number(row.athletics) +
+    Number(row.library) +
+    Number(row.energy)
+);
+}
+
+function saveRow(group, index, btn){
+
+let row = btn.parentNode.parentNode;
+let cells = row.cells;
+
+let updated = {
+    section: cells[0].textContent.toUpperCase(),
+    tuition: cells[1].textContent,
+    registration: cells[2].textContent,
+    testing: cells[3].textContent,
+    instructional: cells[4].textContent,
+    membership: cells[5].textContent,
+    lunch: cells[6].textContent,
+    athletics: cells[7].textContent,
+    library: cells[8].textContent,
+    energy: cells[9].textContent
+};
+
+tuitionData[group][index] = updated;
+
+saveData();
+renderTables();
+
+}
+
+function addRow(group){
+
+tuitionData[group].push({
+    section: "",
+    tuition: 0,
+    registration: 0,
+    testing: 0,
+    instructional: 0,
+    membership: 0,
+    lunch: 0,
+    athletics: 0,
+    library: 0,
+    energy: 0
+});
+
+saveData();
+renderTables();
+
+}
+
+function deleteRow(group, index){
+
+if(confirm("Delete this row?")){
+    tuitionData[group].splice(index,1);
+    saveData();
+    renderTables();
+}
+
+}
+
+function getStudentTuition(grade, section){
+
+let group = "";
+
+if(grade >=1 && grade <=3) group = "G1-3";
+else if(grade <=6) group = "G4-6";
+else if(grade <=10) group = "G7-10";
+else group = "G11-12";
+
+// SHS: match section
+let match = tuitionData[group].find(r =>
+    r.section === section.toUpperCase()
+);
+
+if(match) return calculateTotal(match);
+
+// fallback (no section)
+return calculateTotal(tuitionData[group][0] || {});
+}
 
 function saveTuition(){
 
@@ -142,7 +327,13 @@ function logout() {
     window.location.href = "login.html";
 }
 
-let tuition = getTuition(grade, section);
+function saveData(){
+localStorage.setItem("tuitionData", JSON.stringify(tuitionData));
+}
+
+window.onload = function(){
+    renderTables();
+};
 </script>
 
 </body>
