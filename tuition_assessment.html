@@ -75,7 +75,10 @@ button.primary {
     <input type="number" id="amount" placeholder="Tuition Amount">
 
     <button class="primary" onclick="saveTuition()">Save Rule</button>
+    </div>
 </div>
+
+
 <script>
 let tuitionRules = JSON.parse(localStorage.getItem("tuitionRules")) || [];
 
@@ -138,6 +141,8 @@ function logout() {
     localStorage.removeItem("role");
     window.location.href = "login.html";
 }
+
+let tuition = getTuition(grade, section);
 </script>
 
 </body>
