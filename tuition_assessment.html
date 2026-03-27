@@ -160,7 +160,26 @@ let defaultData = {
 
 let stored = JSON.parse(localStorage.getItem("tuitionData"));
 
-let tuitionData = stored && stored["G1-3"]?.fees ? stored : defaultData;
+let tuitionData = JSON.parse(localStorage.getItem("tuitionData")) || {
+    "G1-3": {
+        fees: [
+            { name: "Tuition", sy2022: 15000, sy2023: 15000, sy2024: 15000 },
+            { name: "Registration Fee", sy2022: 500, sy2023: 500, sy2024: 500 },
+            { name: "Testing", sy2022: 400, sy2023: 400, sy2024: 400 },
+            { name: "Instructional Resources", sy2022: 1000, sy2023: 1400, sy2024: 1400 },
+            { name: "Memberships", sy2022: 100, sy2023: 100, sy2024: 100 },
+            { name: "Lunch Program", sy2022: 0, sy2023: 400, sy2024: 400 },
+            { name: "Athletics", sy2022: 0, sy2023: 100, sy2024: 100 },
+            { name: "Library Fee", sy2022: 0, sy2023: 100, sy2024: 100 },
+            { name: "Energy & Communication", sy2022: 500, sy2023: 500, sy2024: 500 }
+        ],
+        sections: []
+    },
+
+    "G4-6": { fees: [], sections: [] },
+    "G7-10": { fees: [], sections: [] },
+    "G11-12": { fees: [], sections: [] }
+};
 
 let tuitionRules = JSON.parse(localStorage.getItem("tuitionRules")) || [
     { grade: "10", section: "", amount: 20000 },
@@ -177,28 +196,71 @@ Object.keys(tuitionData).forEach(group => {
 
 let groupDiv = document.createElement("div");
 
-let total = calculateTotal(tuitionData[group].fees);
+let fees = tuitionData[group].fees;
 
-// HEADER (IMPORTANT)
-groupDiv.innerHTML = `
-<h3>
-${group} 
-<button class="primary" onclick="openFeeEditor('${group}')">✏️ Edit Tuition</button>
-<button class="primary" onclick="addSection('${group}')">➕ Add Section</button>
-</h3>
-<p><strong>Total Tuition:</strong> ₱${total}</p>
-`;
+// compute totals
+let total2022 = 0;
+let total2023 = 0;
+let total2024 = 0;
 
-// SECTION LIST
-let sectionList = document.createElement("ul");
-
-tuitionData[group].sections.forEach(sec => {
-let li = document.createElement("li");
-li.textContent = sec;
-sectionList.appendChild(li);
+fees.forEach(f => {
+    total2022 += Number(f.sy2022 || 0);
+    total2023 += Number(f.sy2023 || 0);
+    total2024 += Number(f.sy2024 || 0);
 });
 
-groupDiv.appendChild(sectionList);
+let table = document.createElement("table");
+
+table.innerHTML = `
+<thead>
+<tr>
+<th rowspan="2">GRADE LEVEL</th>
+<th rowspan="2">Fee Type</th>
+<th>SY2022-2023</th>
+<th>SY2023-2024</th>
+<th>SY2024-2025</th>
+</tr>
+</thead>
+<tbody id="${group}"></tbody>
+`;
+
+let tbody = table.querySelector("tbody");
+
+// rows (vertical fees)
+fees.forEach((fee, index) => {
+
+let row = tbody.insertRow();
+
+row.innerHTML = `
+<td>${index === 0 ? group : ""}</td>
+<td contenteditable="true">${fee.name}</td>
+<td contenteditable="true">${fee.sy2022}</td>
+<td contenteditable="true">${fee.sy2023}</td>
+<td contenteditable="true">${fee.sy2024}</td>
+`;
+
+});
+
+// TOTAL ROW
+let totalRow = tbody.insertRow();
+
+totalRow.innerHTML = `
+<td></td>
+<td><strong>TOTAL</strong></td>
+<td><strong>${total2022}</strong></td>
+<td><strong>${total2023}</strong></td>
+<td><strong>${total2024}</strong></td>
+`;
+
+// HEADER + BUTTONS
+let header = document.createElement("h3");
+header.innerHTML = `
+${group}
+<button class="primary" onclick="openFeeEditor('${group}')">✏️ Edit Tuition</button>
+`;
+
+groupDiv.appendChild(header);
+groupDiv.appendChild(table);
 
 container.appendChild(groupDiv);
 
@@ -240,12 +302,15 @@ function saveFee(index, btn){
 let row = btn.parentNode.parentNode;
 
 let name = row.cells[0].textContent;
-let amount = Number(row.cells[1].textContent);
+let sy2022 = Number(row.cells[1].textContent);
+let sy2023 = Number(row.cells[2].textContent);
+let sy2024 = Number(row.cells[3].textContent);
 
-tuitionData[currentGroup].fees[index] = { name, amount };
+tuitionData[currentGroup].fees[index] = {
+    name, sy2022, sy2023, sy2024
+};
 
 saveData();
-renderFeeEditor();
 renderTables();
 
 }
