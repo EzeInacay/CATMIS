@@ -1,3 +1,8 @@
+<?php
+include 'php/config.php';
+include 'php/get_balance.php';
+?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -274,7 +279,19 @@ tr:nth-child(even) {
     <div class="cards">
         <div class="card">
             <h4>Total Receivables</h4>
-            <p>₱37,500</p>
+            <?php
+                $res = $conn->query("
+                SELECT 
+                SUM(CASE WHEN entry_type='CHARGE' THEN amount ELSE 0 END) -
+                SUM(CASE WHEN entry_type='PAYMENT' THEN amount ELSE 0 END)
+                AS total_receivables
+                FROM student_ledgers
+                ");
+
+            $data = $res->fetch_assoc();
+            ?>
+
+<p>₱<?= number_format($data['total_receivables'],2) ?></p>
         </div>
 
         <div class="card">
@@ -310,61 +327,43 @@ tr:nth-child(even) {
             </tr>
         </thead>
 <tbody>
+<?php
 
-            <tr>
-                <td>2024-001</td>
-                <td>Huerto, Carl Denzel</td>
-                <td>11</td>
-                <td>ABM-B</td>
-                <td>₱25,500</td>
-                <td>Pending</td>
-                <td><button class="btn-payment">Post Payment</button></td>
-            </tr>
-            <tr>
-                <td>2024-002</td>
-                <td>Loma, Franz Angelo</td>
-                <td>11</td>
-                <td>STEM-A</td>
-                <td>₱12,000</td>
-                <td>Pending</td>
-                <td><button class="btn-payment">Post Payment</button></td>
-            </tr>
-            <tr>
-                <td>2024-003</td>
-                <td>Cruz, Maria</td>
-                <td>10</td>
-                <td>Emerald</td>
-                <td>₱0</td>
-                <td>Paid</td>
-                <td>-</td>
-            </tr><tr>
-                <td>2024-003</td>
-                <td>Cruz, Maria</td>
-                <td>10</td>
-                <td>Emerald</td>
-                <td>₱0</td>
-                <td>Paid</td>
-                <td>-</td>
-            </tr>
-            <tr>
-                <td>2024-003</td>
-                <td>Cruz, Maria</td>
-                <td>10</td>
-                <td>Emerald</td>
-                <td>₱0</td>
-                <td>Paid</td>
-                <td>-</td>
-            </tr>
-            <tr>
-                <td>2024-003</td>
-                <td>Cruz, Maria</td>
-                <td>10</td>
-                <td>Emerald</td>
-                <td>₱0</td>
-                <td>Paid</td>
-                <td>-</td>
-            </tr>
-        </tbody>
+$result = $conn->query("
+SELECT 
+    s.student_id,
+    u.full_name,
+    s.grade_level,
+    s.section,
+    ta.account_id
+FROM students s
+JOIN users u ON s.user_id = u.user_id
+JOIN tuition_accounts ta ON s.student_id = ta.student_id
+");
+
+while($row = $result->fetch_assoc()) {
+
+    $balance = getBalance($conn, $row['account_id']);
+
+    // status logic
+    $status = ($balance <= 0) ? "Paid" : "Pending";
+
+    echo "<tr>
+        <td>{$row['student_id']}</td>
+        <td>{$row['full_name']}</td>
+        <td>{$row['grade_level']}</td>
+        <td>{$row['section']}</td>
+        <td>₱" . number_format($balance,2) . "</td>
+        <td>$status</td>
+        <td>
+            " . ($status === "Pending" 
+                ? "<button class='btn-payment' onclick='pay({$row['account_id']})'>Post Payment</button>" 
+                : "-") . "
+        </td>
+    </tr>";
+}
+?>
+</tbody>
     </table>
     </div>
 </div>
@@ -529,7 +528,9 @@ window.onload = function(){
 sortAlphabetically();
 
 };
-
+function pay(account_id){
+    window.location.href = "payment_form.php?account_id=" + account_id;
+}
 </script>
 
 
