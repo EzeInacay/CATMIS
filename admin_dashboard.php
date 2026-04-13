@@ -146,19 +146,21 @@ body {
 }
 .btn-export:hover { background: #157347; }
 
-/* ===== GRADE BUTTONS ===== */
-.grade-buttons { margin-top: 15px; display: flex; flex-wrap: wrap; gap: 8px; }
-.grade-buttons button {
-    padding: 8px 14px;
-    border: none;
-    background: #0077b6;
-    color: white;
+/* ===== GRADE DROPDOWN ===== */
+.grade-filter-row { margin-top: 15px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.grade-filter-row label { font-size: 14px; font-weight: 600; color: #374151; white-space: nowrap; }
+.grade-select {
+    padding: 9px 36px 9px 14px;    border: 1px solid #cbd5e1;
     border-radius: 6px;
+    background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E") no-repeat right 12px center;
+    appearance: none;
+    font-size: 14px;
+    color: #0f2027;
     cursor: pointer;
-    font-size: 13px;
-    transition: background 0.2s;
+    min-width: 160px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.07);
 }
-.grade-buttons button:hover, .grade-buttons button.active-btn { background: #005f8e; }
+.grade-select:focus { outline: none; border-color: #0077b6; box-shadow: 0 0 0 3px rgba(0,119,182,0.15); }
 
 /* ===== SECTION BUTTONS ===== */
 .section-buttons { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; min-height: 36px; }
@@ -275,21 +277,24 @@ tr:hover { background: #f0f4ff; }
         </button>
     </div>
 
-    <!-- Grade filter buttons (all grades 1–12) -->
-    <div class="grade-buttons" id="gradeButtons">
-        <button class="active-btn" onclick="filterGrade('all', this)">All</button>
-        <button onclick="filterGrade('1',  this)">Grade 1</button>
-        <button onclick="filterGrade('2',  this)">Grade 2</button>
-        <button onclick="filterGrade('3',  this)">Grade 3</button>
-        <button onclick="filterGrade('4',  this)">Grade 4</button>
-        <button onclick="filterGrade('5',  this)">Grade 5</button>
-        <button onclick="filterGrade('6',  this)">Grade 6</button>
-        <button onclick="filterGrade('7',  this)">Grade 7</button>
-        <button onclick="filterGrade('8',  this)">Grade 8</button>
-        <button onclick="filterGrade('9',  this)">Grade 9</button>
-        <button onclick="filterGrade('10', this)">Grade 10</button>
-        <button onclick="filterGrade('11', this)">Grade 11</button>
-        <button onclick="filterGrade('12', this)">Grade 12</button>
+    <!-- Grade filter dropdown -->
+    <div class="grade-filter-row">
+        <label for="gradeSelect">Filter by Grade:</label>
+        <select class="grade-select" id="gradeSelect" onchange="filterGrade(this.value)">
+            <option value="all">All Grades</option>
+            <option value="1">Grade 1</option>
+            <option value="2">Grade 2</option>
+            <option value="3">Grade 3</option>
+            <option value="4">Grade 4</option>
+            <option value="5">Grade 5</option>
+            <option value="6">Grade 6</option>
+            <option value="7">Grade 7</option>
+            <option value="8">Grade 8</option>
+            <option value="9">Grade 9</option>
+            <option value="10">Grade 10</option>
+            <option value="11">Grade 11</option>
+            <option value="12">Grade 12</option>
+        </select>
     </div>
 
     <!-- Section buttons appear here after grade click -->
@@ -387,13 +392,12 @@ function searchTable() {
 }
 
 /* ── Grade filter ── */
-function filterGrade(grade, btn) {
+function filterGrade(grade) {
     currentGrade   = grade;
     currentSection = 'all';
 
-    // highlight active grade button
-    document.querySelectorAll('#gradeButtons button').forEach(b => b.classList.remove('active-btn'));
-    if (btn) btn.classList.add('active-btn');
+    // reset section buttons
+    document.getElementById('sectionButtons').innerHTML = '';
 
     const sections = new Set();
     allRows.forEach(row => {
@@ -496,4 +500,4 @@ function logout() {
 window.onload = () => sortAlphabetically();
 </script>
 </body>
-</html>
+</html>g
