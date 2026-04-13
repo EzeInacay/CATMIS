@@ -96,9 +96,10 @@ $activeDebtors    = $pendingCount;
             <option value="<?= $g ?>">Grade <?= $g ?></option>
             <?php endfor; ?>
         </select>
+        <div class="section-buttons" id="sectionButtons"></div>
     </div>
 
-    <div class="section-buttons" id="sectionButtons"></div>
+    
 
     <div class="table-container">
         <table id="studentTable">
