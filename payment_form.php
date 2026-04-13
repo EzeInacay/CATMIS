@@ -1,6 +1,6 @@
 <?php
 session_start();
-include 'config.php';
+include 'php/config.php';
 
 // Guard: must be logged in
 if (!isset($_SESSION['user_id'])) {
