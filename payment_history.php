@@ -152,7 +152,7 @@ tr:hover td { background: #f8faff; }
         <a href="#">💾 Backup</a>
     </div>
     <div class="navbar-right">
-        <button class="logout-btn" onclick="window.location.href='logout.php'">Logout</button>
+        <button class="logout-btn" onclick="window.location.href='php/logout.php'">Logout</button>
     </div>
 </nav>
 

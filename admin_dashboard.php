@@ -60,7 +60,7 @@ $activeDebtors    = $pendingCount;
         <?php if ($pendingCount > 0): ?>
         <div class="notif-badge">⚠ <?= $pendingCount ?> Pending</div>
         <?php endif; ?>
-        <button class="logout-btn" onclick="logout()">Logout</button>
+        <button class="logout-btn" onclick="window.location.href='php/logout.php'">Logout</button>
     </div>
 </nav>
 
