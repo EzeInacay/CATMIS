@@ -36,7 +36,7 @@ $teacherActions = count(array_filter($logs, fn($l) => $l['role'] === 'teacher'))
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Audit Logs | CATMIS</title>
+<title>CATMIS</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
