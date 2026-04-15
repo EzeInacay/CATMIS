@@ -19,8 +19,8 @@
 define('MAIL_HOST',       'smtp.gmail.com');
 define('MAIL_PORT',       587);
 define('MAIL_ENCRYPTION', 'tls');
-define('MAIL_USER',       'ezetest420@gmail.com');   // ← your Gmail address
-define('MAIL_PASS',       'nyfy vadu wseb qvir'); // ← 16-char App Password (no spaces)
-define('MAIL_FROM',       'ezetest420@gmail.com');   // ← same as MAIL_USER usually
+define('MAIL_USER',       'ezetest240@gmail.com');   // ← your Gmail address
+define('MAIL_PASS',       'nyfyvaduwsebqvir'); // ← 16-char App Password (no spaces)
+define('MAIL_FROM',       'ezetest240@gmail.com');   // ← same as MAIL_USER usually
 define('MAIL_FROM_NAME',  'CATMIS Portal');
 ?>

@@ -34,8 +34,16 @@ function sendMail(string $toEmail, string $toName, string $subject, string $html
         $mail->SMTPAuth   = true;
         $mail->Username   = MAIL_USER;
         $mail->Password   = MAIL_PASS;
-        $mail->SMTPSecure = MAIL_ENCRYPTION;
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = MAIL_PORT;
+        $mail->Timeout    = 30;
+        $mail->SMTPOptions = [
+            'ssl' => [
+                'verify_peer'       => false,
+                'verify_peer_name'  => false,
+                'allow_self_signed' => true,
+            ],
+        ];
 
         // Sender
         $mail->setFrom(MAIL_FROM, MAIL_FROM_NAME);
