@@ -1,686 +1,361 @@
 <?php
 session_start();
 include 'php/config.php';
+include 'php/get_balance.php';
 
-// Guard: must be logged in as teacher
-if (!isset($_SESSION['user_id'])) {
-    header('Location: login.php');
-    exit;
-}
-if ($_SESSION['role'] !== 'teacher') {
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'teacher') {
     header('Location: login.php');
     exit;
 }
 
-$teacher_id = $_SESSION['user_id'];
+$teacher_user_id = $_SESSION['user_id'];
 
-// Get teacher info + assigned section
-$stmt = $conn->prepare("
-    SELECT 
-        u.full_name, 
-        t.teacher_id, 
-        s.section_id, 
-        s.section_name, 
-        s.grade_level, 
-        sy.name AS academic_year
-    FROM users u
-    JOIN teachers t ON t.user_id = u.user_id
-    LEFT JOIN sections s ON s.teacher_id = t.teacher_id
-    LEFT JOIN school_years sy ON s.sy_id = sy.sy_id
-    WHERE u.user_id = ?
-    LIMIT 1
+// ── Get teacher record & name ────────────────────────────────────
+$tStmt = $conn->prepare("
+    SELECT t.teacher_id, u.full_name, u.email
+    FROM teachers t JOIN users u ON t.user_id = u.user_id
+    WHERE t.user_id = ?
 ");
-$stmt->bind_param('i', $teacher_id);
-$stmt->execute();
-$teacher = $stmt->get_result()->fetch_assoc();
+$tStmt->bind_param('i', $teacher_user_id);
+$tStmt->execute();
+$teacher = $tStmt->get_result()->fetch_assoc();
+$teacher_id   = $teacher['teacher_id'] ?? 0;
+$teacher_name = $teacher['full_name']  ?? 'Teacher';
 
-// Get students in the section with their tuition status
+// ── Get active school year ───────────────────────────────────────
+$syRow = $conn->query("SELECT sy_id, name FROM school_years WHERE status='active' LIMIT 1")->fetch_assoc();
+$sy_id   = $syRow['sy_id']  ?? 0;
+$sy_name = $syRow['name']   ?? '—';
+
+// ── Get all sections assigned to this teacher ────────────────────
+$secStmt = $conn->prepare("
+    SELECT section_id, section_name, grade_level
+    FROM sections
+    WHERE teacher_id = ? AND sy_id = ?
+    ORDER BY grade_level ASC, section_name ASC
+");
+$secStmt->bind_param('ii', $teacher_id, $sy_id);
+$secStmt->execute();
+$sections = $secStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+// ── Build section_ids list for queries ───────────────────────────
+$sectionIds = array_column($sections, 'section_id');
+
+// ── Load all students across teacher's sections ──────────────────
 $students = [];
-if (!empty($teacher['section_id'])) {
-$stmt2 = $conn->prepare("
-    SELECT
-        u.full_name,
-        s.student_id,
-        u.student_number,
-        ta.account_id,
+$totalStudents = 0;
+$totalPaid     = 0;
+$totalPending  = 0;
+$totalBalance  = 0;
 
-        (ta.base_fee + ta.misc_fee - ta.discount + ta.penalties) AS total_tuition,
+if (!empty($sectionIds)) {
+    $placeholders = implode(',', array_fill(0, count($sectionIds), '?'));
+    $types        = str_repeat('i', count($sectionIds));
 
-        COALESCE(
-            SUM(CASE WHEN sl.entry_type = 'CHARGE'   THEN sl.amount ELSE 0 END) -
-            SUM(CASE WHEN sl.entry_type = 'PAYMENT'  THEN sl.amount ELSE 0 END) -
-            SUM(CASE WHEN sl.entry_type = 'DISCOUNT' THEN sl.amount ELSE 0 END) +
-            SUM(CASE WHEN sl.entry_type = 'PENALTY'  THEN sl.amount ELSE 0 END),
-        0) AS balance
+    $sStmt = $conn->prepare("
+        SELECT
+            s.student_id, s.section_id, s.grade_level, s.section,
+            u.full_name, u.student_number, u.email,
+            ta.account_id
+        FROM students s
+        JOIN users u ON s.user_id = u.user_id
+        JOIN tuition_accounts ta ON s.student_id = ta.student_id
+        WHERE s.section_id IN ($placeholders)
+        ORDER BY s.section_id, u.full_name ASC
+    ");
+    $sStmt->bind_param($types, ...$sectionIds);
+    $sStmt->execute();
+    $rawStudents = $sStmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
-    FROM students s
-    JOIN users u ON s.user_id = u.user_id
-    LEFT JOIN tuition_accounts ta ON ta.student_id = s.student_id
-    LEFT JOIN student_ledgers sl ON sl.account_id = ta.account_id
-
-    WHERE s.section_id = ?
-    GROUP BY s.student_id, u.full_name, u.student_number, ta.account_id, total_tuition
-    ORDER BY u.full_name ASC
-");
-    $stmt2->bind_param('i', $teacher['section_id']);
-    $stmt2->execute();
-    $students = $stmt2->get_result()->fetch_all(MYSQLI_ASSOC);
+    foreach ($rawStudents as $row) {
+        $bal = getBalance($conn, $row['account_id']);
+        $row['balance'] = $bal;
+        $row['status']  = $bal <= 0 ? 'Paid' : 'Pending';
+        $students[]     = $row;
+        $totalStudents++;
+        $totalBalance += $bal;
+        if ($bal <= 0) $totalPaid++;
+        else           $totalPending++;
+    }
 }
 
-// Summary counts
-$total    = count($students);
-$cleared  = 0;
-$pending  = 0;
-$partial  = 0;
+// ── AJAX: fetch ledger for a student ────────────────────────────
+if (isset($_GET['ledger_for'])) {
+    header('Content-Type: application/json');
+    $account_id = intval($_GET['ledger_for']);
 
-foreach ($students as $st) {
-    $bal = floatval($st['balance']);
-    $tot = floatval($st['total_tuition']);
-    if ($bal <= 0)          $cleared++;
-    elseif ($bal >= $tot)   $pending++;
-    else                    $partial++;
+    // Security: verify this account belongs to one of teacher's sections
+    if (!empty($sectionIds)) {
+        $placeholders = implode(',', array_fill(0, count($sectionIds), '?'));
+        $types        = str_repeat('i', count($sectionIds));
+        $chk = $conn->prepare("
+            SELECT ta.account_id FROM tuition_accounts ta
+            JOIN students s ON ta.student_id = s.student_id
+            WHERE ta.account_id = ? AND s.section_id IN ($placeholders)
+        ");
+        $chk->bind_param('i' . $types, $account_id, ...$sectionIds);
+        $chk->execute();
+        if ($chk->get_result()->num_rows === 0) {
+            echo json_encode(['error' => 'Access denied.']); exit;
+        }
+    }
+
+    $lStmt = $conn->prepare("
+        SELECT sl.entry_type, sl.amount, sl.remarks, sl.created_at,
+               tf.label AS fee_label
+        FROM student_ledgers sl
+        LEFT JOIN tuition_fees tf ON sl.fee_id = tf.fee_id
+        WHERE sl.account_id = ?
+        ORDER BY sl.created_at ASC
+    ");
+    $lStmt->bind_param('i', $account_id);
+    $lStmt->execute();
+    $ledger = $lStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+    // Compute running balance
+    $running = 0;
+    foreach ($ledger as &$entry) {
+        if (in_array($entry['entry_type'], ['CHARGE', 'PENALTY'])) $running += $entry['amount'];
+        else $running -= $entry['amount'];
+        $entry['running'] = max(0, round($running, 2));
+    }
+    echo json_encode(['ledger' => $ledger, 'balance' => getBalance($conn, $account_id)]);
+    exit;
 }
-
-// Search filter (client-side, but also PHP for URL state)
-$search = trim($_GET['search'] ?? '');
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Teacher Portal | CATMIS</title>
+<title>Teacher Dashboard | CATMIS</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-/* ── Reset & Base ──────────────────────────────── */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-    font-family: 'Segoe UI', Arial, sans-serif;
-    background: #eef1f4;
-    min-height: 100vh;
-    display: flex;
-}
-
-/* ── Sidebar ───────────────────────────────────── */
-.sidebar {
-    width: 220px;
-    min-height: 100vh;
-    background: #0f2027;
-    display: flex;
-    flex-direction: column;
-    position: fixed;
-    top: 0; left: 0;
-    z-index: 100;
-}
-
-.sidebar-brand {
-    padding: 28px 24px 20px;
-    border-bottom: 1px solid rgba(255,255,255,0.07);
-}
-
-.sidebar-brand .logo {
-    font-size: 22px;
-    font-weight: 800;
-    color: #fff;
-    letter-spacing: 1px;
-}
-
-.sidebar-brand .sub {
-    font-size: 11px;
-    color: #94a3b8;
-    margin-top: 3px;
-}
-
-.sidebar-nav {
-    flex: 1;
-    padding: 20px 0;
-}
-
-.nav-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 24px;
-    color: #94a3b8;
-    font-size: 13.5px;
-    text-decoration: none;
-    transition: background 0.15s, color 0.15s;
-    cursor: pointer;
-}
-
-.nav-item.active,
-.nav-item:hover {
-    background: rgba(255,255,255,0.07);
-    color: #fff;
-}
-
-.nav-item svg { flex-shrink: 0; }
-
-.sidebar-footer {
-    padding: 16px 24px;
-    border-top: 1px solid rgba(255,255,255,0.07);
-}
-
-.logout-btn {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: #dc2626;
-    color: #fff;
-    border: none;
-    border-radius: 7px;
-    padding: 10px 16px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    width: 100%;
-    text-decoration: none;
-    transition: background 0.2s;
-}
-.logout-btn:hover { background: #b91c1c; }
-
-/* ── Main Content ──────────────────────────────── */
-.main {
-    margin-left: 220px;
-    flex: 1;
-    padding: 32px 36px;
-    min-height: 100vh;
-}
-
-/* ── Top Bar ───────────────────────────────────── */
-.topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 28px;
-}
-
-.topbar-title h1 {
-    font-size: 22px;
-    color: #0f2027;
-    font-weight: 700;
-}
-
-.topbar-title p {
-    font-size: 13px;
-    color: #64748b;
-    margin-top: 3px;
-}
-
-.topbar-user {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: #fff;
-    border-radius: 10px;
-    padding: 8px 16px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-}
-
-.topbar-user .avatar {
-    width: 34px; height: 34px;
-    border-radius: 50%;
-    background: #0077b6;
-    color: #fff;
-    font-weight: 700;
-    font-size: 14px;
-    display: flex; align-items: center; justify-content: center;
-}
-
-.topbar-user .name { font-size: 13px; font-weight: 600; color: #0f2027; }
-.topbar-user .role { font-size: 11px; color: #64748b; }
-
-/* ── Section Banner ────────────────────────────── */
-.section-banner {
-    background: linear-gradient(135deg, #0077b6 0%, #0f2027 100%);
-    border-radius: 14px;
-    padding: 24px 30px;
-    color: #fff;
-    margin-bottom: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.section-banner .sec-info h2 {
-    font-size: 26px;
-    font-weight: 800;
-    letter-spacing: 0.5px;
-}
-
-.section-banner .sec-info p {
-    font-size: 13px;
-    opacity: 0.8;
-    margin-top: 4px;
-}
-
-.section-banner .sec-badge {
-    background: rgba(255,255,255,0.15);
-    border-radius: 10px;
-    padding: 12px 20px;
-    text-align: center;
-}
-
-.section-banner .sec-badge .num {
-    font-size: 30px;
-    font-weight: 800;
-}
-
-.section-banner .sec-badge .lbl {
-    font-size: 11px;
-    opacity: 0.8;
-    margin-top: 2px;
-}
-
-/* ── Summary Cards ─────────────────────────────── */
-.summary-row {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
-    margin-bottom: 24px;
-}
-
-.summary-card {
-    background: #fff;
-    border-radius: 12px;
-    padding: 20px 24px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-    border-left: 4px solid transparent;
-}
-
-.summary-card.cleared  { border-left-color: #10b981; }
-.summary-card.partial  { border-left-color: #f59e0b; }
-.summary-card.pending  { border-left-color: #ef4444; }
-
-.summary-card .label {
-    font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #64748b;
-    margin-bottom: 8px;
-}
-
-.summary-card .count {
-    font-size: 28px;
-    font-weight: 800;
-    color: #0f2027;
-}
-
-.summary-card .desc {
-    font-size: 12px;
-    color: #94a3b8;
-    margin-top: 4px;
-}
-
-/* ── Search ────────────────────────────────────── */
-.toolbar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 16px;
-}
-
-.search-wrap {
-    position: relative;
-    flex: 1;
-    max-width: 340px;
-}
-
-.search-wrap svg {
-    position: absolute;
-    left: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #94a3b8;
-}
-
-.search-wrap input {
-    width: 100%;
-    padding: 10px 14px 10px 38px;
-    border: 1.5px solid #e2e8f0;
-    border-radius: 9px;
-    font-size: 13.5px;
-    color: #0f2027;
-    background: #fff;
-    outline: none;
-    transition: border-color 0.2s;
-}
-
-.search-wrap input:focus { border-color: #0077b6; }
-
-.result-count {
-    font-size: 13px;
-    color: #64748b;
-    margin-left: auto;
-}
-
-/* ── Table ─────────────────────────────────────── */
-.table-wrap {
-    background: #fff;
-    border-radius: 14px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-    overflow: hidden;
-}
-
-table {
-    width: 100%;
-    border-collapse: collapse;
-}
-
-thead th {
-    background: #f8fafc;
-    padding: 13px 20px;
-    font-size: 11.5px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #64748b;
-    text-align: left;
-    border-bottom: 1px solid #f1f5f9;
-}
-
-tbody tr {
-    border-bottom: 1px solid #f8fafc;
-    transition: background 0.12s;
-}
-
-tbody tr:last-child { border-bottom: none; }
-tbody tr:hover { background: #f8fafc; }
-
-tbody td {
-    padding: 14px 20px;
-    font-size: 13.5px;
-    color: #0f2027;
-    vertical-align: middle;
-}
-
-.student-name {
-    font-weight: 600;
-}
-
-.student-num {
-    font-size: 12px;
-    color: #94a3b8;
-    margin-top: 2px;
-}
-
-.balance-cell {
-    font-weight: 700;
-    font-size: 14px;
-}
-
-.balance-cell.cleared { color: #10b981; }
-.balance-cell.partial  { color: #f59e0b; }
-.balance-cell.overdue  { color: #ef4444; }
-
-/* Status pill */
-.pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 4px 12px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.pill.cleared  { background: #d1fae5; color: #065f46; }
-.pill.partial  { background: #fef3c7; color: #92400e; }
-.pill.pending  { background: #fef2f2; color: #991b1b; }
-
-.pill-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-}
-
-.pill.cleared .pill-dot  { background: #10b981; }
-.pill.partial .pill-dot  { background: #f59e0b; }
-.pill.pending .pill-dot  { background: #ef4444; }
-
-/* ── No section / no students ──────────────────── */
-.empty-state {
-    text-align: center;
-    padding: 60px 20px;
-    color: #94a3b8;
-}
-
-.empty-state svg { margin-bottom: 16px; }
-.empty-state p { font-size: 14px; }
-
-/* ── Notice banner ─────────────────────────────── */
-.notice {
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    border-radius: 10px;
-    padding: 12px 18px;
-    font-size: 13px;
-    color: #1e40af;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-/* ── Responsive ────────────────────────────────── */
-@media (max-width: 900px) {
-    .sidebar { width: 64px; }
-    .sidebar-brand .sub, .nav-item span, .sidebar-brand .logo { display: none; }
-    .main { margin-left: 64px; padding: 20px 16px; }
-    .summary-row { grid-template-columns: 1fr 1fr; }
-}
-</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link href="css/teacherd.css" rel="stylesheet">
 </head>
 <body>
 
-<!-- ── Sidebar ─────────────────────────────────── -->
-<aside class="sidebar">
-    <div class="sidebar-brand">
-        <div class="logo">CATMIS</div>
-        <div class="sub">CCS Portal</div>
+<!-- ===== NAVBAR ===== -->
+<nav class="navbar">
+    <a href="teacher_dashboard.php" class="navbar-brand">
+        <h2>CATMIS</h2>
+        <span>CCS Portal</span>
+    </a>
+    <div class="navbar-links">
+        <a href="teacher_dashboard.php" class="active">🏠 My Dashboard</a>
+        <a href="teacher_attendance.php">📋 Attendance</a>
+        <a href="teacher_class_report.php">📊 Class Report</a>
+    </div>
+    <div class="navbar-right">
+        <span class="teacher-badge">👤 <?= htmlspecialchars($teacher_name) ?></span>
+        <button class="logout-btn" onclick="window.location.href='php/logout.php'">Logout</button>
+    </div>
+</nav>
+
+<!-- ===== MAIN ===== -->
+<div class="main">
+    <div class="page-title">Teacher Dashboard</div>
+    <div class="page-subtitle">
+        SY <?= htmlspecialchars($sy_name) ?> &nbsp;·&nbsp;
+        <?= count($sections) ?> section<?= count($sections) !== 1 ? 's' : '' ?> assigned
+        &nbsp;·&nbsp; Read-only view
     </div>
 
-    <nav class="sidebar-nav">
-        <a class="nav-item active" href="teacher_dashboard.php">
-            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                <polyline points="9 22 9 12 15 12 15 22"/>
-            </svg>
-            <span>Teacher Portal</span>
-        </a>
-    </nav>
-
-    <div class="sidebar-footer">
-        <a href="php/logout.php" class="logout-btn">
-            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                <polyline points="16 17 21 12 16 7"/>
-                <line x1="21" y1="12" x2="9" y2="12"/>
-            </svg>
-            <span>Logout</span>
-        </a>
+    <?php if (empty($sections)): ?>
+    <div style="background:white;border-radius:12px;padding:40px;text-align:center;box-shadow:0 4px 10px rgba(0,0,0,0.05);">
+        <p style="color:#94a3b8;font-size:15px;">No sections have been assigned to you yet.<br>Please contact your administrator.</p>
     </div>
-</aside>
-
-<!-- ── Main ────────────────────────────────────── -->
-<main class="main">
-
-    <!-- Top Bar -->
-    <div class="topbar">
-        <div class="topbar-title">
-            <h1>Teacher / Instructor Portal</h1>
-            <p>View-only access to your section's tuition status</p>
-        </div>
-        <div class="topbar-user">
-            <div class="avatar"><?= strtoupper(substr($teacher['full_name'] ?? 'T', 0, 1)) ?></div>
-            <div>
-                <div class="name"><?= htmlspecialchars($teacher['full_name'] ?? 'Teacher') ?></div>
-                <div class="role">Teacher &nbsp;·&nbsp; <?= htmlspecialchars($teacher['employee_number'] ?? '') ?></div>
-            </div>
-        </div>
-    </div>
-
-    <?php if (empty($teacher['section_id'])): ?>
-
-        <!-- No section assigned -->
-        <div class="empty-state">
-            <svg width="60" height="60" fill="none" stroke="#cbd5e1" stroke-width="1.5" viewBox="0 0 24 24">
-                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/>
-                <line x1="12" y1="16" x2="12.01" y2="16"/>
-            </svg>
-            <p>You have not been assigned to a section yet.<br>Please contact your administrator.</p>
-        </div>
-
     <?php else: ?>
 
-        <!-- Section Banner -->
-        <div class="section-banner">
-            <div class="sec-info">
-                <h2><?= htmlspecialchars($teacher['section_name']) ?></h2>
-                <p>
-                    Grade <?= htmlspecialchars($teacher['grade_level']) ?>
-                    &nbsp;·&nbsp;
-                    A.Y. <?= htmlspecialchars($teacher['academic_year']) ?>
-                </p>
-            </div>
-            <div class="sec-badge">
-                <div class="num"><?= $total ?></div>
-                <div class="lbl">Students</div>
-            </div>
+    <!-- Summary cards -->
+    <div class="cards">
+        <div class="card">
+            <h4>Total Students</h4>
+            <p><?= $totalStudents ?></p>
         </div>
-
-        <!-- Summary Cards -->
-        <div class="summary-row">
-            <div class="summary-card cleared">
-                <div class="label">Cleared</div>
-                <div class="count"><?= $cleared ?></div>
-                <div class="desc">Fully paid students</div>
-            </div>
-            <div class="summary-card partial">
-                <div class="label">Partial</div>
-                <div class="count"><?= $partial ?></div>
-                <div class="desc">Have remaining balance</div>
-            </div>
-            <div class="summary-card pending">
-                <div class="label">Not Paid</div>
-                <div class="count"><?= $pending ?></div>
-                <div class="desc">No payments recorded</div>
-            </div>
+        <div class="card blue">
+            <h4>Sections</h4>
+            <p><?= count($sections) ?></p>
         </div>
-
-        <!-- Read-only Notice -->
-        <div class="notice">
-            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/>
-                <line x1="12" y1="16" x2="12.01" y2="16"/>
-            </svg>
-            You have view-only access. Payment processing and record editing are restricted to accounting staff.
+        <div class="card">
+            <h4>Fully Paid</h4>
+            <p><?= $totalPaid ?></p>
         </div>
-
-        <!-- Search & Table -->
-        <div class="toolbar">
-            <div class="search-wrap">
-                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                </svg>
-                <input
-                    type="text"
-                    id="searchInput"
-                    placeholder="Search student name or ID…"
-                    value="<?= htmlspecialchars($search) ?>"
-                    oninput="filterTable()"
-                >
-            </div>
-            <span class="result-count" id="resultCount">
-                Showing <?= $total ?> student<?= $total !== 1 ? 's' : '' ?>
-            </span>
+        <div class="card red">
+            <h4>With Balance</h4>
+            <p><?= $totalPending ?></p>
         </div>
+        <div class="card amber">
+            <h4>Total Outstanding</h4>
+            <p style="font-size:18px;">₱<?= number_format($totalBalance, 2) ?></p>
+        </div>
+    </div>
 
-        <div class="table-wrap">
+    <!-- Section tabs -->
+    <div class="section-tabs">
+        <button class="tab-btn active" onclick="switchSection('all', this)">All Sections</button>
+        <?php foreach ($sections as $sec): ?>
+        <button class="tab-btn" onclick="switchSection('<?= $sec['section_id'] ?>', this)">
+            Grade <?= htmlspecialchars($sec['grade_level']) ?> – <?= htmlspecialchars($sec['section_name']) ?>
+        </button>
+        <?php endforeach; ?>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <input type="text" class="search-box" id="searchInput" placeholder="🔍 Search student name or ID…" oninput="applyFilters()">
+        <button class="btn-export" onclick="exportExcel()">📥 Export Excel</button>
+    </div>
+
+    <!-- Student table -->
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Student ID</th>
+                    <th>Student Name</th>
+                    <th>Grade</th>
+                    <th>Section</th>
+                    <th>Balance</th>
+                    <th>Status</th>
+                    <th>Ledger</th>
+                </tr>
+            </thead>
+            <tbody id="studentTable">
             <?php if (empty($students)): ?>
-                <div class="empty-state">
-                    <svg width="50" height="50" fill="none" stroke="#cbd5e1" stroke-width="1.5" viewBox="0 0 24 24">
-                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                        <circle cx="9" cy="7" r="4"/>
-                    </svg>
-                    <p>No students found in this section.</p>
-                </div>
+                <tr><td colspan="7" class="empty-msg">No students found in your sections.</td></tr>
             <?php else: ?>
-                <table id="studentTable">
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>Student</th>
-                            <th>Total Tuition</th>
-                            <th>Remaining Balance</th>
-                            <th>Payment Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($students as $i => $st):
-                            $bal = floatval($st['balance']);
-                            $tot = floatval($st['total_tuition']);
-
-                            if ($bal <= 0) {
-                                $statusClass = 'cleared';
-                                $statusLabel = 'Cleared';
-                                $balClass    = 'cleared';
-                            } elseif ($bal >= $tot) {
-                                $statusClass = 'pending';
-                                $statusLabel = 'Not Paid';
-                                $balClass    = 'overdue';
-                            } else {
-                                $statusClass = 'partial';
-                                $statusLabel = 'Partial';
-                                $balClass    = 'partial';
-                            }
-                        ?>
-                        <tr class="student-row">
-                            <td style="color:#94a3b8; font-size:12px;"><?= $i + 1 ?></td>
-                            <td>
-                                <div class="student-name"><?= htmlspecialchars($st['full_name']) ?></div>
-                                <div class="student-num"><?= htmlspecialchars($st['student_number']) ?></div>
-                            </td>
-                            <td>₱<?= number_format($tot, 2) ?></td>
-                            <td>
-                                <span class="balance-cell <?= $balClass ?>">
-                                    <?= $bal <= 0 ? '₱0.00' : '₱' . number_format($bal, 2) ?>
-                                </span>
-                            </td>
-                            <td>
-                                <span class="pill <?= $statusClass ?>">
-                                    <span class="pill-dot"></span>
-                                    <?= $statusLabel ?>
-                                </span>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+                <?php foreach ($students as $s): ?>
+                <tr
+                    data-section="<?= $s['section_id'] ?>"
+                    data-search="<?= htmlspecialchars(strtolower($s['full_name'] . ' ' . ($s['student_number'] ?? ''))) ?>"
+                >
+                    <td><?= htmlspecialchars($s['student_number'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($s['full_name']) ?></td>
+                    <td><?= htmlspecialchars($s['grade_level']) ?></td>
+                    <td><?= htmlspecialchars($s['section']) ?></td>
+                    <td>₱<?= number_format($s['balance'], 2) ?></td>
+                    <td><span class="badge-<?= strtolower($s['status']) ?>"><?= $s['status'] ?></span></td>
+                    <td>
+                        <button
+                            style="background:#e0f2fe;color:#0369a1;border:none;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;"
+                            onclick="viewLedger(<?= $s['account_id'] ?>, '<?= htmlspecialchars(addslashes($s['full_name'])) ?>')">
+                            📋 View
+                        </button>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
             <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Student ledger drill-down panel -->
+    <div class="ledger-panel" id="ledgerPanel">
+        <div class="ledger-header">
+            <h3 id="ledgerTitle">Student Ledger</h3>
+            <button class="ledger-close" onclick="closeLedger()">×</button>
         </div>
+        <div class="ledger-body">
+            <table id="ledgerTable">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Description</th>
+                        <th>Type</th>
+                        <th style="text-align:right">Amount</th>
+                        <th style="text-align:right">Running Balance</th>
+                    </tr>
+                </thead>
+                <tbody id="ledgerBody">
+                    <tr><td colspan="5" class="empty-msg">Loading…</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
 
     <?php endif; ?>
-
-</main>
+</div>
 
 <script>
-function filterTable() {
-    const q = document.getElementById('searchInput').value.toLowerCase();
-    const rows = document.querySelectorAll('.student-row');
-    let visible = 0;
+const allRows = Array.from(document.querySelectorAll('#studentTable tr[data-section]'));
+let currentSection = 'all';
 
-    rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        const show = text.includes(q);
-        row.style.display = show ? '' : 'none';
-        if (show) visible++;
+function switchSection(secId, btn) {
+    currentSection = secId;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    applyFilters();
+    closeLedger();
+}
+
+function applyFilters() {
+    const q = document.getElementById('searchInput').value.toLowerCase();
+    allRows.forEach(row => {
+        const secOk    = currentSection === 'all' || row.dataset.section === currentSection;
+        const searchOk = !q || row.dataset.search.includes(q);
+        row.style.display = secOk && searchOk ? '' : 'none';
+    });
+}
+
+async function viewLedger(accountId, name) {
+    document.getElementById('ledgerTitle').textContent = 'Ledger — ' + name;
+    document.getElementById('ledgerBody').innerHTML = '<tr><td colspan="5" class="empty-msg">Loading…</td></tr>';
+    document.getElementById('ledgerPanel').classList.add('open');
+    document.getElementById('ledgerPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    const res  = await fetch('teacher_dashboard.php?ledger_for=' + accountId);
+    const data = await res.json();
+
+    if (data.error) {
+        document.getElementById('ledgerBody').innerHTML = `<tr><td colspan="5" class="empty-msg">${data.error}</td></tr>`;
+        return;
+    }
+
+    const typeColors = {
+        CHARGE: 'entry-CHARGE', PAYMENT: 'entry-PAYMENT',
+        DISCOUNT: 'entry-DISCOUNT', PENALTY: 'entry-PENALTY', ADJUSTMENT: 'entry-ADJUSTMENT'
+    };
+
+    let html = '';
+    data.ledger.forEach(e => {
+        const sign  = ['PAYMENT','DISCOUNT'].includes(e.entry_type) ? '−' : '+';
+        const color = ['PAYMENT','DISCOUNT'].includes(e.entry_type) ? '#198754'
+                    : e.entry_type === 'PENALTY' ? '#dc2626' : '#0f2027';
+        const desc  = e.fee_label || e.remarks || '—';
+        const date  = new Date(e.created_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' });
+        html += `<tr>
+            <td style="color:#94a3b8;font-size:12px;white-space:nowrap;">${date}</td>
+            <td>${desc}</td>
+            <td><span class="entry-badge ${typeColors[e.entry_type] || ''}">${e.entry_type}</span></td>
+            <td style="text-align:right;color:${color}">${sign}₱${parseFloat(e.amount).toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
+            <td style="text-align:right;font-weight:600;">₱${parseFloat(e.running).toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
+        </tr>`;
     });
 
-    document.getElementById('resultCount').textContent =
-        `Showing ${visible} student${visible !== 1 ? 's' : ''}`;
+    if (!html) html = '<tr><td colspan="5" class="empty-msg">No ledger entries found.</td></tr>';
+    document.getElementById('ledgerBody').innerHTML = html;
+}
+
+function closeLedger() {
+    document.getElementById('ledgerPanel').classList.remove('open');
+}
+
+function exportExcel() {
+    const headers = ['Student ID', 'Name', 'Grade', 'Section', 'Balance', 'Status'];
+    const data    = [headers];
+    allRows.forEach(row => {
+        if (row.style.display === 'none') return;
+        const c = row.querySelectorAll('td');
+        data.push([c[0].textContent.trim(), c[1].textContent.trim(),
+                   c[2].textContent.trim(), c[3].textContent.trim(),
+                   c[4].textContent.trim(), c[5].textContent.trim()]);
+    });
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!cols'] = [{wch:14},{wch:28},{wch:8},{wch:16},{wch:14},{wch:10}];
+    XLSX.utils.book_append_sheet(wb, ws, 'My Students');
+    XLSX.writeFile(wb, `CATMIS_MyStudents_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 </script>
-
 </body>
 </html>
