@@ -2,6 +2,7 @@
 session_start();
 include 'php/config.php';
 include 'php/mailer.php';
+include 'php/notify.php';
 
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     header('Location: login.php');
@@ -64,6 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if ($role === 'student' && !empty($email) && !empty($student_number)) {
             mailAccountCreated($email, $full_name, $student_number, $raw_password);
         }
+        pushNotification($conn, 'new_account', 'New Account Created', "Account created for {$full_name} ({$role})", 'user_management.php');
 
         echo json_encode(['success' => true, 'user_id' => $new_id]); exit;
     }
