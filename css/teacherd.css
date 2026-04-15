@@ -1,0 +1,87 @@
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f4; }
+
+/* NAVBAR — teal accent instead of admin blue */
+.navbar {
+    position: fixed; top: 0; left: 0; right: 0; height: 60px;
+    background: linear-gradient(90deg, #0f2027, #1a3a35);
+    display: flex; align-items: center; padding: 0 24px;
+    z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.navbar-brand { display: flex; align-items: baseline; gap: 10px; text-decoration: none; margin-right: 32px; flex-shrink: 0; }
+.navbar-brand h2 { margin: 0; color: #fff; font-size: 20px; letter-spacing: -0.5px; }
+.navbar-brand span { font-size: 11px; color: rgba(255,255,255,0.45); letter-spacing: 1px; }
+.navbar-links { display: flex; align-items: center; gap: 2px; flex: 1; }
+.navbar-links a { color: rgba(255,255,255,0.7); text-decoration: none; padding: 8px 13px; border-radius: 6px; font-size: 13.5px; white-space: nowrap; transition: background 0.18s, color 0.18s; }
+.navbar-links a:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.navbar-links a.active { background: rgba(255,255,255,0.15); color: #fff; }
+.navbar-right { display: flex; align-items: center; gap: 12px; margin-left: auto; flex-shrink: 0; }
+.teacher-badge { font-size: 12px; color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 20px; padding: 4px 12px; }
+.logout-btn { background: #ff3b30; border: none; color: white; padding: 7px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-family: 'Segoe UI', Arial, sans-serif; transition: background 0.18s; }
+.logout-btn:hover { background: #d0302a; }
+
+/* MAIN */
+.main { margin-top: 60px; padding: 30px; }
+.page-title { font-size: 24px; font-weight: bold; color: #0f2027; margin-bottom: 4px; }
+.page-subtitle { font-size: 13px; color: #64748b; margin-bottom: 24px; }
+
+/* SECTION TABS */
+.section-tabs { display: flex; gap: 8px; margin-bottom: 22px; flex-wrap: wrap; }
+.tab-btn { padding: 8px 18px; border: 1.5px solid #cbd5e1; border-radius: 20px; background: white; color: #374151; font-size: 13px; font-weight: 600; cursor: pointer; font-family: 'Segoe UI', Arial, sans-serif; transition: all 0.18s; }
+.tab-btn:hover { border-color: #0f6e56; color: #0f6e56; }
+.tab-btn.active { background: #0f2027; color: white; border-color: #0f2027; }
+
+/* SUMMARY CARDS */
+.cards { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+.card { flex: 1; min-width: 140px; background: white; padding: 18px 20px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); border-left: 6px solid #0f6e56; }
+.card.blue   { border-color: #0077b6; }
+.card.amber  { border-color: #d97706; }
+.card.red    { border-color: #dc2626; }
+.card h4 { margin: 0 0 6px; color: #6c757d; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
+.card p  { font-size: 26px; margin: 0; font-weight: bold; color: #0f2027; }
+
+/* TOOLBAR */
+.toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.search-box { padding: 9px 14px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; width: 280px; outline: none; font-family: inherit; }
+.search-box:focus { border-color: #0f6e56; box-shadow: 0 0 0 3px rgba(15,110,86,0.1); }
+.btn-export { padding: 9px 16px; background: #198754; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-family: inherit; display: flex; align-items: center; gap: 5px; transition: background 0.18s; white-space: nowrap; }
+.btn-export:hover { background: #157347; }
+
+/* TABLE */
+.table-container { background: white; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); max-height: 440px; overflow-y: auto; }
+table { width: 100%; border-collapse: collapse; }
+th { background: #f2f4f7; padding: 12px 15px; text-align: left; font-size: 13px; font-weight: 600; color: #374151; position: sticky; top: 0; z-index: 1; }
+td { padding: 12px 15px; font-size: 14px; border-bottom: 1px solid #f1f5f9; color: #0f2027; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #f0fdf4; cursor: pointer; }
+
+.badge-paid    { background: #d1fae5; color: #065f46; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+.badge-pending { background: #fee2e2; color: #991b1b; padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+
+/* LEDGER PANEL (slide-in) */
+.ledger-panel {
+    display: none;
+    background: white; border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    margin-top: 20px; overflow: hidden;
+}
+.ledger-panel.open { display: block; }
+.ledger-header { background: #0f2027; color: white; padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; }
+.ledger-header h3 { margin: 0; font-size: 16px; }
+.ledger-close { background: none; border: none; color: rgba(255,255,255,0.6); font-size: 20px; cursor: pointer; line-height: 1; }
+.ledger-close:hover { color: white; }
+.ledger-body { padding: 16px; max-height: 320px; overflow-y: auto; }
+
+.entry-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+.entry-CHARGE     { background: #e0f2fe; color: #0369a1; }
+.entry-PAYMENT    { background: #d1fae5; color: #065f46; }
+.entry-DISCOUNT   { background: #f3e8ff; color: #6b21a8; }
+.entry-PENALTY    { background: #fee2e2; color: #991b1b; }
+.entry-ADJUSTMENT { background: #fef3c7; color: #92400e; }
+
+.empty-msg { text-align: center; color: #94a3b8; padding: 32px; font-size: 14px; }
+
+@media (max-width: 768px) {
+    .cards { flex-direction: column; }
+    .main { padding: 20px 14px; }
+}

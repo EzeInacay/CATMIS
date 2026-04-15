@@ -1,14 +1,6 @@
 <?php
 /**
- * mailer.php — Reusable email sender using PHPMailer
- *
- * INSTALLATION (run once in your project root via terminal):
- *   composer require phpmailer/phpmailer
- *
- * If you don't have Composer:
- *   1. Download from https://getcomposer.org/download/
- *   2. Run: php composer.phar require phpmailer/phpmailer
- *
+ * mailer.php — Reusable email sender using PHPMailers
  * Usage:
  *   include 'mailer.php';
  *   sendMail('student@email.com', 'Subject here', '<p>HTML body here</p>');
@@ -34,8 +26,16 @@ function sendMail(string $toEmail, string $toName, string $subject, string $html
         $mail->SMTPAuth   = true;
         $mail->Username   = MAIL_USER;
         $mail->Password   = MAIL_PASS;
-        $mail->SMTPSecure = MAIL_ENCRYPTION;
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = MAIL_PORT;
+        $mail->Timeout    = 30;
+        $mail->SMTPOptions = [
+            'ssl' => [
+                'verify_peer'       => false,
+                'verify_peer_name'  => false,
+                'allow_self_signed' => true,
+            ],
+        ];
 
         // Sender
         $mail->setFrom(MAIL_FROM, MAIL_FROM_NAME);
