@@ -205,12 +205,12 @@ tr:last-child td { border-bottom: none; }
 <body>
 
 <nav class="navbar">
-    <a href="user_dashboard.php" class="navbar-brand">
+    <a href="student_dashboard.php" class="navbar-brand">
         <h2>CATMIS</h2>
         <span>CCS Portal</span>
     </a>
     <div class="navbar-right">
-        <a href="user_dashboard.php" class="nav-back">← Back to Dashboard</a>
+        <a href="student_dashboard.php" class="nav-back">← Back to Dashboard</a>
         <button class="logout-btn" onclick="window.location.href='php/logout.php'">Logout</button>
     </div>
 </nav>
