@@ -1,0 +1,6 @@
+2026-04-15 05:29:07 | To: admin@catmis.edu.ph | SMTP Error: Could not authenticate.
+2026-04-15 05:29:30 | To: finance@catmis.edu.ph | SMTP Error: Could not connect to SMTP host. STARTTLS command failed SMTP server error: Called QUIT without being connected
+2026-04-15 05:35:18 | To: ezetest420@gmail.com | SMTP Error: Could not authenticate.
+2026-04-15 05:36:55 | To: admin@catmis.edu.ph | SMTP Error: Could not authenticate.
+2026-04-15 05:36:59 | To: finance@catmis.edu.ph | SMTP Error: Could not authenticate.
+2026-04-15 05:37:30 | To: ezetest420@gmail.com | SMTP Error: Could not authenticate.
