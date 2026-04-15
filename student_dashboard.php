@@ -280,6 +280,11 @@ tr:hover td { background: #f8faff; }
                 <div class="value"><?= htmlspecialchars($student['sy_name'] ?? '—') ?></div>
             </div>
             <?php endif; ?>
+            <div class="meta-item" style="align-self:center;">
+                <a href="edit_request_form.php" style="display:inline-block;padding:8px 18px;background:#0077b6;color:white;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;white-space:nowrap;">
+                    ✏️ Request Info Edit
+                </a>
+            </div>
         </div>
     </div>
 

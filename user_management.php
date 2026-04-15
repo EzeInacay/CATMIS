@@ -1,6 +1,7 @@
 <?php
 session_start();
 include 'php/config.php';
+include 'php/mailer.php';
 
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     header('Location: login.php');
@@ -58,6 +59,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $log = $conn->prepare("INSERT INTO audit_logs (user_id, action) VALUES (?, ?)");
         $act = "Created user account: {$full_name} ({$role})";
         $log->bind_param('is', $_SESSION['user_id'], $act); $log->execute();
+
+        // Email the new user their credentials (students only — they need to know their ID + password)
+        if ($role === 'student' && !empty($email) && !empty($student_number)) {
+            mailAccountCreated($email, $full_name, $student_number, $raw_password);
+        }
 
         echo json_encode(['success' => true, 'user_id' => $new_id]); exit;
     }
@@ -225,6 +231,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $log = $conn->prepare("INSERT INTO audit_logs (user_id, action) VALUES (?,?)");
             $act = "Bulk import created student: {$full_name} ({$student_number}) — Grade {$grade_level} {$section_name}";
             $log->bind_param('is', $admin, $act); $log->execute();
+
+            // Email student their credentials
+            if (!empty($email)) {
+                mailAccountCreated($email, $full_name, $student_number, $raw_password);
+            }
 
             $results[] = [
                 'name'           => $full_name,
@@ -412,10 +423,11 @@ tr:hover td { background: #f8faff; }
         <a href="user_management.php" class="active">👥 Users</a>
         <a href="payment_history.php">📄 Payments</a>
         <a href="audit_logs.php">🕒 Audit Logs</a>
+        <a href="edit_requests_admin.php">📝 Edit Requests</a>
         <a href="#">💾 Backup</a>
     </div>
     <div class="navbar-right">
-        <button class="logout-btn" onclick="window.location.href='php/logout.php'">Logout</button>
+        <button class="logout-btn" onclick="window.location.href='logout.php'">Logout</button>
     </div>
 </nav>
 

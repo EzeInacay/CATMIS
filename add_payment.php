@@ -4,14 +4,13 @@
  *
  * Processes a payment form submission.
  * Inserts into: payments, student_ledgers, audit_logs.
- *
- * PAYMENT/DISCOUNT/PENALTY ledger entries do NOT link to a
- * specific fee row — fee_id is left NULL for these entry types.
- * Only CHARGE rows (posted at registration) carry a fee_id.
+ * Sends email confirmation to the student after successful payment.
  */
 
 session_start();
 include 'php/config.php';
+include 'php/get_balance.php';
+include 'php/mailer.php';
 
 // ── Auth guard ───────────────────────────────────────────────────
 if (!isset($_SESSION['user_id'])) {
@@ -59,14 +58,11 @@ try {
     $stmt1->execute();
 
     // ── 2. Insert PAYMENT into student_ledgers (fee_id = NULL) ───
-    //    PAYMENT entries are not tied to a specific fee row —
-    //    they offset the total balance across all charges.
     $remarks = "OR#{$or_number} - {$method}";
     $stmt2 = $conn->prepare("
         INSERT INTO student_ledgers
             (account_id, fee_id, entry_type, amount, remarks, posted_by)
-        VALUES
-            (?, NULL, 'PAYMENT', ?, ?, ?)
+        VALUES (?, NULL, 'PAYMENT', ?, ?, ?)
     ");
     $stmt2->bind_param('idsi', $account_id, $amount, $remarks, $posted_by);
     $stmt2->execute();
@@ -78,6 +74,30 @@ try {
     $stmt3->execute();
 
     $conn->commit();
+
+    // ── 4. Email student (after commit — don't let mail failure roll back payment) ──
+    $studentInfo = $conn->prepare("
+        SELECT u.full_name, u.email
+        FROM students s
+        JOIN users u ON s.user_id = u.user_id
+        WHERE s.student_id = ?
+    ");
+    $studentInfo->bind_param('i', $student_id);
+    $studentInfo->execute();
+    $info = $studentInfo->get_result()->fetch_assoc();
+
+    if ($info && $info['email']) {
+        $remainingBalance = getBalance($conn, $account_id);
+        mailPaymentPosted(
+            $info['email'],
+            $info['full_name'],
+            $or_number,
+            $amount,
+            $method,
+            $remainingBalance
+        );
+    }
+
     header("Location: payment_form.php?account_id={$account_id}&success=1");
 
 } catch (Exception $e) {
