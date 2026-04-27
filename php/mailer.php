@@ -106,7 +106,7 @@ function emailWrapper(string $title, string $content): string {
 // ── Pre-built email templates ────────────────────────────────────
 
 function mailPaymentPosted(string $toEmail, string $toName, string $orNumber, float $amount, string $method, float $remainingBalance): bool|string {
-    $subject = "Payment Received — OR# {$orNumber}";
+    $subject = "Payment Received = OR# {$orNumber}";
     $paid    = $remainingBalance <= 0;
     $body = "
         <p>Dear <strong>{$toName}</strong>,</p>

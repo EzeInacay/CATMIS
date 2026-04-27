@@ -2,6 +2,7 @@
 session_start();
 include 'php/config.php';
 include 'php/mailer.php';
+include 'php/notify.php';
 
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     header('Location: login.php');
@@ -64,6 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if ($role === 'student' && !empty($email) && !empty($student_number)) {
             mailAccountCreated($email, $full_name, $student_number, $raw_password);
         }
+        pushNotification($conn, 'new_account', 'New Account Created', "Account created for {$full_name} ({$role})", 'user_management.php');
 
         echo json_encode(['success' => true, 'user_id' => $new_id]); exit;
     }
@@ -707,19 +709,60 @@ function exportExcel() {
     link.click();
 }
 
-// ── Download blank import template ──────────────────────────────
+// ── Download import template (Excel with Instructions sheet) ─────
 function downloadTemplate() {
-    const csv = [
-        'student_number,full_name,email,grade_level,section,strand',
-        '2025-00011,Dela Cruz Juan A.,juan.delacruz@catmis.edu.ph,11,STEM-A,STEM',
-        '2025-00012,Santos Maria B.,maria.santos@catmis.edu.ph,7,Mabini,',
-        '2025-00013,Reyes Carlo D.,carlo.reyes@catmis.edu.ph,10,Emerald,',
-    ].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const link = document.createElement('a');
-    link.href     = URL.createObjectURL(blob);
-    link.download = 'CATMIS_Student_Import_Template.csv';
-    link.click();
+    if (typeof XLSX === 'undefined') {
+        alert('Excel library not loaded yet. Please wait a moment and try again.');
+        return;
+    }
+
+    const wb = XLSX.utils.book_new();
+
+    // ── Sheet 1: Import Data (fill this in) ──────────────────────
+    const dataRows = [
+        // Header row
+        ['student_number', 'full_name', 'email', 'grade_level', 'section', 'strand'],
+        // Sample rows
+        ['2025-00011', 'Dela Cruz, Juan A.', 'juan.delacruz@catmis.edu.ph', '11', 'STEM-A', 'STEM'],
+        ['2025-00012', 'Santos, Maria B.',   'maria.santos@catmis.edu.ph',   '7',  'Mabini', ''],
+        ['2025-00013', 'Reyes, Carlo D.',    'carlo.reyes@catmis.edu.ph',    '10', 'Emerald',''],
+    ];
+    const ws1 = XLSX.utils.aoa_to_sheet(dataRows);
+    ws1['!cols'] = [
+        {wch:16}, {wch:28}, {wch:32}, {wch:12}, {wch:16}, {wch:12}
+    ];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Import Data');
+
+    // ── Sheet 2: Instructions ─────────────────────────────────────
+    const instructions = [
+        ['CATMIS Student Import Template — Instructions'],
+        [''],
+        ['COLUMN', 'REQUIRED?', 'FORMAT / NOTES'],
+        ['student_number', 'Yes', 'Unique student ID. e.g. 2025-00001'],
+        ['full_name',      'Yes', 'Last, First M. — use comma format'],
+        ['email',          'Yes', 'Must be unique. e.g. s00001@catmis.edu.ph'],
+        ['grade_level',    'Yes', 'Number only: 1 to 12'],
+        ['section',        'Yes', 'Must match an existing section name exactly. e.g. Mabini, STEM-A'],
+        ['strand',         'SHS only', 'Required for Grades 11-12. One of: STEM, ABM, HUMSS'],
+        [''],
+        ['IMPORTANT NOTES'],
+        ['• Do NOT change the column headers in row 1.'],
+        ['• Delete the 3 sample rows before importing.'],
+        ['• Students are assigned tuition automatically based on their grade and section.'],
+        ['• A random temporary password is generated and emailed to each student.'],
+        ['• Duplicate student_number or email entries will be skipped.'],
+        ['• Strand column can be left blank for Grades 1-10.'],
+        [''],
+        ['VALID STRANDS (Grade 11-12 only)'],
+        ['STEM', '— Science, Technology, Engineering and Mathematics'],
+        ['ABM',  '— Accountancy, Business and Management'],
+        ['HUMSS','— Humanities and Social Sciences'],
+    ];
+    const ws2 = XLSX.utils.aoa_to_sheet(instructions);
+    ws2['!cols'] = [{wch:20}, {wch:14}, {wch:55}];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Instructions');
+
+    XLSX.writeFile(wb, 'CATMIS_Student_Import_Template.xlsx');
 }
 
 // ── Handle imported file (Excel or CSV) ────────────────────────
