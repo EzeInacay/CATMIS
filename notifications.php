@@ -9,36 +9,26 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
 
 $admin_id = $_SESSION['user_id'];
 
-// ── Helper: get current unread count ────────────────────────────
-function getUnreadCount($conn, $admin_id) {
-    $stmt = $conn->prepare("SELECT COUNT(*) AS cnt FROM notifications WHERE admin_id=? AND is_read=0");
-    $stmt->bind_param('i', $admin_id);
-    $stmt->execute();
-    return (int) $stmt->get_result()->fetch_assoc()['cnt'];
-}
-
-// ── Handle mark-read / mark-all-read / delete ────────────────────────────
+// ── Handle mark-read / mark-all-read ────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
     $action = $_POST['action'] ?? '';
 
     if ($action === 'mark_read') {
         $id = intval($_POST['notif_id'] ?? 0);
-        // FIX: single clean prepare + execute (was double-executing before)
+        $conn->prepare("UPDATE notifications SET is_read=1 WHERE notif_id=? AND admin_id=?")
+             ->bind_param('ii', $id, $admin_id) && $conn->execute();
         $stmt = $conn->prepare("UPDATE notifications SET is_read=1 WHERE notif_id=? AND admin_id=?");
         $stmt->bind_param('ii', $id, $admin_id);
         $stmt->execute();
-        // FIX: return actual remaining unread count so JS badge stays correct
-        echo json_encode(['success' => true, 'unread' => getUnreadCount($conn, $admin_id)]);
-        exit;
+        echo json_encode(['success' => true]); exit;
     }
 
     if ($action === 'mark_all_read') {
         $stmt = $conn->prepare("UPDATE notifications SET is_read=1 WHERE admin_id=?");
         $stmt->bind_param('i', $admin_id);
         $stmt->execute();
-        echo json_encode(['success' => true, 'unread' => 0]);
-        exit;
+        echo json_encode(['success' => true]); exit;
     }
 
     if ($action === 'delete') {
@@ -46,17 +36,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $conn->prepare("DELETE FROM notifications WHERE notif_id=? AND admin_id=?");
         $stmt->bind_param('ii', $id, $admin_id);
         $stmt->execute();
-        // FIX: return remaining unread count after deletion too
-        echo json_encode(['success' => true, 'unread' => getUnreadCount($conn, $admin_id)]);
-        exit;
+        echo json_encode(['success' => true]); exit;
     }
 
-    echo json_encode(['error' => 'Unknown action.']);
-    exit;
+    echo json_encode(['error' => 'Unknown action.']); exit;
 }
 
 // ── Count unread ─────────────────────────────────────────────────
-$unreadCount = getUnreadCount($conn, $admin_id);
+$unreadStmt = $conn->prepare("SELECT COUNT(*) AS cnt FROM notifications WHERE admin_id=? AND is_read=0");
+$unreadStmt->bind_param('i', $admin_id);
+$unreadStmt->execute();
+$unreadCount = $unreadStmt->get_result()->fetch_assoc()['cnt'] ?? 0;
 
 // ── Load notifications ───────────────────────────────────────────
 $notifStmt = $conn->prepare("
@@ -144,7 +134,7 @@ $typeColor = [
         <a href="notifications.php" id="bellLink" style="position:relative;text-decoration:none;">
             <span style="font-size:20px;">🔔</span>
             <?php if ($unreadCount > 0): ?>
-            <span id="bellBadge" style="position:absolute;top:-4px;right:-4px;background:#ff3b30;color:white;border-radius:50%;width:16px;height:16px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;"><?= $unreadCount ?></span>
+            <span style="position:absolute;top:-4px;right:-4px;background:#ff3b30;color:white;border-radius:50%;width:16px;height:16px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;"><?= $unreadCount ?></span>
             <?php endif; ?>
         </a>
         <button class="logout-btn" onclick="window.location.href='php/logout.php'">Logout</button>
@@ -153,9 +143,9 @@ $typeColor = [
 
 <div class="main">
     <div class="notif-toolbar">
-        <h2>🔔 Notifications <?php if ($unreadCount > 0): ?><span id="unreadLabel" style="font-size:14px;color:#0077b6;font-weight:normal;">(<?= $unreadCount ?> unread)</span><?php endif; ?></h2>
+        <h2>🔔 Notifications <?php if ($unreadCount > 0): ?><span style="font-size:14px;color:#0077b6;font-weight:normal;">(<?= $unreadCount ?> unread)</span><?php endif; ?></h2>
         <?php if ($unreadCount > 0): ?>
-        <button class="btn-mark-all" id="markAllBtn" onclick="markAllRead()">✓ Mark all as read</button>
+        <button class="btn-mark-all" onclick="markAllRead()">✓ Mark all as read</button>
         <?php endif; ?>
     </div>
 
@@ -177,7 +167,7 @@ $typeColor = [
         $color = $typeColor[$n['type']] ?? '#6b21a8';
         $unread = !$n['is_read'];
     ?>
-    <div class="notif-card <?= $unread ? 'unread' : '' ?>" id="notif-<?= $n['notif_id'] ?>" data-type="<?= htmlspecialchars($n['type']) ?>">
+    <div class="notif-card <?= $unread ? 'unread' : '' ?>" id="notif-<?= $n['notif_id'] ?>" data-type="<?= $n['type'] ?>">
         <div class="notif-icon" style="background:<?= $bg ?>;color:<?= $color ?>;"><?= $icon ?></div>
         <div class="notif-body">
             <div class="notif-title"><?= htmlspecialchars($n['title']) ?></div>
@@ -186,7 +176,7 @@ $typeColor = [
         </div>
         <div class="notif-actions">
             <?php if ($unread): ?>
-            <button class="btn-read" id="readbtn-<?= $n['notif_id'] ?>" onclick="markRead(<?= $n['notif_id'] ?>)">Mark read</button>
+            <button class="btn-read" onclick="markRead(<?= $n['notif_id'] ?>)">Mark read</button>
             <?php endif; ?>
             <button class="btn-del" onclick="deleteNotif(<?= $n['notif_id'] ?>)">Delete</button>
         </div>
@@ -205,19 +195,21 @@ function filterType(type, btn) {
     });
 }
 
-// FIX: update badge using the real unread count returned by PHP
 function updateBellBadge(count) {
-    const badge = document.getElementById('bellBadge');
-    const label = document.getElementById('unreadLabel');
-    const markAllBtn = document.getElementById('markAllBtn');
-
+    // Update the bell badge count in the navbar
+    let badge = document.getElementById('bellBadge');
     if (count > 0) {
-        if (badge) badge.textContent = Math.min(count, 99);
-        if (label) label.textContent = `(${count} unread)`;
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.id = 'bellBadge';
+            badge.style.cssText = 'position:absolute;top:-6px;right:-6px;background:#ff3b30;color:white;border-radius:50%;width:18px;height:18px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;';
+            document.getElementById('bellLink')?.appendChild(badge);
+        }
+        badge.textContent = Math.min(count, 99);
     } else {
         badge?.remove();
-        label?.remove();
-        markAllBtn?.remove();
+        // Also hide the mark-all button
+        document.querySelector('.btn-mark-all')?.remove();
     }
 }
 
@@ -225,41 +217,30 @@ async function markRead(id) {
     const body = new FormData();
     body.append('action', 'mark_read');
     body.append('notif_id', id);
-
-    try {
-        const res  = await fetch('notifications.php', { method: 'POST', body });
-        const data = await res.json();
-        if (data.success) {
-            const card = document.getElementById('notif-' + id);
-            if (card) {
-                card.classList.remove('unread');
-                // Remove the mark-read button for this card
-                document.getElementById('readbtn-' + id)?.remove();
-            }
-            // FIX: use real unread count from server, not hardcoded 0
-            updateBellBadge(data.unread);
+    const res  = await fetch('notifications.php', { method: 'POST', body });
+    const data = await res.json();
+    if (data.success) {
+        const card = document.getElementById('notif-' + id);
+        if (card) {
+            card.classList.remove('unread');
+            card.querySelector('.btn-read')?.remove();
         }
-    } catch (e) {
-        console.error('markRead failed:', e);
+        updateBellBadge(data.unread ?? 0);
     }
 }
 
 async function markAllRead() {
     const body = new FormData();
     body.append('action', 'mark_all_read');
-
-    try {
-        const res  = await fetch('notifications.php', { method: 'POST', body });
-        const data = await res.json();
-        if (data.success) {
-            document.querySelectorAll('.notif-card').forEach(c => {
-                c.classList.remove('unread');
-                c.querySelector('.btn-read')?.remove();
-            });
-            updateBellBadge(0);
-        }
-    } catch (e) {
-        console.error('markAllRead failed:', e);
+    const res  = await fetch('notifications.php', { method: 'POST', body });
+    const data = await res.json();
+    if (data.success) {
+        document.querySelectorAll('.notif-card').forEach(c => {
+            c.classList.remove('unread');
+            c.querySelector('.btn-read')?.remove();
+        });
+        document.querySelector('.btn-mark-all')?.remove();
+        updateBellBadge(0);
     }
 }
 
@@ -267,23 +248,18 @@ async function deleteNotif(id) {
     const body = new FormData();
     body.append('action', 'delete');
     body.append('notif_id', id);
-
-    try {
-        const res  = await fetch('notifications.php', { method: 'POST', body });
-        const data = await res.json();
-        if (data.success) {
-            const card = document.getElementById('notif-' + id);
-            if (card) {
-                card.style.opacity = '0';
-                setTimeout(() => card.remove(), 300);
-            }
-            // FIX: use real unread count (deleting an unread notif reduces badge too)
-            updateBellBadge(data.unread);
-        }
-    } catch (e) {
-        console.error('deleteNotif failed:', e);
+    const res  = await fetch('notifications.php', { method: 'POST', body });
+    const data = await res.json();
+    if (data.success) {
+        const card = document.getElementById('notif-' + id);
+        if (card) { card.style.opacity = '0'; setTimeout(() => card.remove(), 300); }
+        updateBellBadge(data.unread ?? 0);
     }
 }
+
+// Page is open = all notifications auto-marked read by server.
+// Remove the red dot immediately on load.
+document.addEventListener('DOMContentLoaded', () => updateBellBadge(0));
 </script>
 </body>
 </html>

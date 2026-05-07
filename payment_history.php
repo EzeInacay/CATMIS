@@ -37,7 +37,7 @@ while ($row = $result->fetch_assoc()) {
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CATMIS</title>
+<title>Payment History | CATMIS</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -152,7 +152,7 @@ tr:hover td { background: #f8faff; }
         <a href="#">💾 Backup</a>
     </div>
     <div class="navbar-right">
-        <button class="logout-btn" onclick="window.location.href='php/logout.php'">Logout</button>
+        <button class="logout-btn" onclick="window.location.href='logout.php'">Logout</button>
     </div>
 </nav>
 
