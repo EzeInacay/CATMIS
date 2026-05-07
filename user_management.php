@@ -26,7 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if (!$full_name || !$email || !$role || !$raw_password) {
             echo json_encode(['error' => 'Missing required fields.']); exit;
         }
-        if (!in_array($role, ['admin', 'teacher', 'student'])) {
+        if (!in_array($role, ['teacher', 'student'])) {
             echo json_encode(['error' => 'Invalid role.']); exit;
         }
 
@@ -534,7 +534,6 @@ tr:hover td { background: #f8faff; }
                 <select id="mRole">
                     <option value="student">Student</option>
                     <option value="teacher">Teacher</option>
-                    <option value="admin">Admin</option>
                 </select>
             </div>
             <div class="form-field">
