@@ -2,6 +2,7 @@
 session_start();
 include 'php/config.php';
 include 'php/mailer.php';
+include 'php/notify.php';
 
 // ── Auth: students only ──────────────────────────────────────────
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'student') {
@@ -93,7 +94,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['field_name'])) {
         $log->bind_param('is', $user_id, $act);
         $log->execute();
 
-        // Email all admins
+        // Email all admins + push notification
         $admins = $conn->query("SELECT full_name, email FROM users WHERE role='admin' AND status='active'");
         while ($admin = $admins->fetch_assoc()) {
             mailEditRequestSubmitted(
@@ -104,6 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['field_name'])) {
                 $new_value
             );
         }
+        pushNotification($conn, 'edit_request', 'Edit Request Submitted', "{$student['full_name']} requested to change their " . str_replace('_',' ',$field_name), 'edit_requests_admin.php');
 
         $success = 'Your request has been submitted. An admin will review it shortly.';
 

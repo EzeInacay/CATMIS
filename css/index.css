@@ -1,0 +1,189 @@
+:root {
+    --navy:   #0f2027;
+    --mid:    #203a43;
+    --accent: #00b4d8;
+    --light:  #eef1f4;
+    --white:  #ffffff;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--navy);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ── BACKGROUND MESH ── */
+.bg-mesh {
+    position: fixed;
+    inset: 0;
+    background:
+        radial-gradient(ellipse 80% 60% at 20% 80%, rgba(0,180,216,0.08) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 50% at 80% 10%, rgba(32,58,67,0.6) 0%, transparent 60%),
+        linear-gradient(160deg, #0f2027 0%, #203a43 50%, #0f2027 100%);
+    z-index: 0;
+}
+
+/* subtle grid lines */
+.bg-mesh::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(rgba(0,180,216,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,180,216,0.04) 1px, transparent 1px);
+    background-size: 48px 48px;
+}
+
+/* ── CONTENT ── */
+.wrapper {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 40px 20px;
+    gap: 0;
+}
+
+/* ── BRAND ── */
+.brand {
+    text-align: center;
+    margin-bottom: 56px;
+    animation: fadeUp 0.7s ease both;
+}
+
+.brand-tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 14px;
+    opacity: 0.9;
+}
+
+.brand h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(52px, 8vw, 88px);
+    color: var(--white);
+    line-height: 1;
+    letter-spacing: -2px;
+}
+
+.brand p {
+    margin-top: 14px;
+    font-size: 14px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 0.5px;
+    max-width: 360px;
+    margin-inline: auto;
+    line-height: 1.6;
+}
+
+/* ── DIVIDER ── */
+.divider {
+    width: 40px;
+    height: 2px;
+    background: var(--accent);
+    margin: 0 auto 48px;
+    opacity: 0.6;
+    animation: fadeUp 0.7s 0.1s ease both;
+}
+
+/* ── CARDS ── */
+.cards {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+    animation: fadeUp 0.7s 0.2s ease both;
+}
+
+.login-card {
+    width: 220px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 36px 24px 30px;
+    text-align: center;
+    text-decoration: none;
+    color: var(--white);
+    cursor: pointer;
+    transition: background 0.25s, border-color 0.25s, transform 0.25s;
+    backdrop-filter: blur(8px);
+    position: relative;
+    overflow: hidden;
+}
+
+.login-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(0,180,216,0.08), transparent);
+    opacity: 0;
+    transition: opacity 0.25s;
+}
+
+.login-card:hover {
+    background: rgba(255,255,255,0.08);
+    border-color: rgba(0,180,216,0.4);
+    transform: translateY(-4px);
+}
+
+.login-card:hover::before { opacity: 1; }
+
+.card-icon {
+    font-size: 36px;
+    margin-bottom: 16px;
+    display: block;
+}
+
+.card-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 20px;
+    margin-bottom: 8px;
+}
+
+.card-desc {
+    font-size: 12px;
+    font-weight: 300;
+    color: rgba(255,255,255,0.45);
+    line-height: 1.5;
+}
+
+.card-arrow {
+    display: inline-block;
+    margin-top: 20px;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+    opacity: 0.8;
+}
+
+/* ── FOOTER ── */
+.footer {
+    position: fixed;
+    bottom: 24px;
+    left: 0; right: 0;
+    text-align: center;
+    font-size: 11px;
+    color: rgba(255,255,255,0.2);
+    letter-spacing: 1px;
+    z-index: 1;
+}
+
+/* ── ANIMATIONS ── */
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+}

@@ -49,6 +49,87 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         exit;
     }
 
+
+    // Add a new section
+    if ($action === 'add_section') {
+        $grade_level  = trim($_POST['grade_level']  ?? '');
+        $section_name = trim($_POST['section_name'] ?? '');
+        $sy_id        = intval($_POST['sy_id']      ?? 0);
+        $teacher_id   = intval($_POST['teacher_id'] ?? 0) ?: null;
+
+        if (!$grade_level || !$section_name || !$sy_id) {
+            echo json_encode(['error' => 'Grade level, section name, and school year are required.']); exit;
+        }
+
+        // Check for duplicate
+        $chk = $conn->prepare("SELECT section_id FROM sections WHERE section_name=? AND grade_level=? AND sy_id=?");
+        $chk->bind_param('ssi', $section_name, $grade_level, $sy_id);
+        $chk->execute();
+        if ($chk->get_result()->num_rows > 0) {
+            echo json_encode(['error' => "Section '{$section_name}' already exists for Grade {$grade_level} in this school year."]); exit;
+        }
+
+        $stmt = $conn->prepare("INSERT INTO sections (section_name, grade_level, sy_id, teacher_id) VALUES (?,?,?,?)");
+        $stmt->bind_param('ssii', $section_name, $grade_level, $sy_id, $teacher_id);
+        $stmt->execute();
+        $new_id = $conn->insert_id;
+
+        // Audit log
+        $uid = $_SESSION['user_id'];
+        $log = $conn->prepare("INSERT INTO audit_logs (user_id, action) VALUES (?,?)");
+        $act = "Added section: Grade {$grade_level} – {$section_name} (SY ID {$sy_id})";
+        $log->bind_param('is', $uid, $act); $log->execute();
+
+        echo json_encode(['success' => true, 'section_id' => $new_id]);
+        exit;
+    }
+
+    // Add a new school year
+    if ($action === 'add_school_year') {
+        $name = trim($_POST['name'] ?? '');
+        if (!preg_match('/^\d{4}-\d{4}$/', $name)) {
+            echo json_encode(['error' => 'School year must be in format YYYY-YYYY (e.g. 2026-2027).']); exit;
+        }
+
+        // Check duplicate
+        $chk = $conn->prepare("SELECT sy_id FROM school_years WHERE name=?");
+        $chk->bind_param('s', $name); $chk->execute();
+        if ($chk->get_result()->num_rows > 0) {
+            echo json_encode(['error' => "School year {$name} already exists."]); exit;
+        }
+
+        $stmt = $conn->prepare("INSERT INTO school_years (name, status) VALUES (?, 'active')");
+        $stmt->bind_param('s', $name); $stmt->execute();
+        $new_id = $conn->insert_id;
+
+        $uid = $_SESSION['user_id'];
+        $log = $conn->prepare("INSERT INTO audit_logs (user_id, action) VALUES (?,?)");
+        $act = "Added new school year: {$name}";
+        $log->bind_param('is', $uid, $act); $log->execute();
+
+        echo json_encode(['success' => true, 'sy_id' => $new_id, 'name' => $name]);
+        exit;
+    }
+
+    // Set a school year as active (archives all others)
+    if ($action === 'set_active_sy') {
+        $sy_id = intval($_POST['sy_id'] ?? 0);
+        if (!$sy_id) { echo json_encode(['error' => 'Invalid school year.']); exit; }
+
+        // Archive all, then activate the selected one
+        $conn->query("UPDATE school_years SET status='archived'");
+        $stmt = $conn->prepare("UPDATE school_years SET status='active' WHERE sy_id=?");
+        $stmt->bind_param('i', $sy_id); $stmt->execute();
+
+        $uid = $_SESSION['user_id'];
+        $log = $conn->prepare("INSERT INTO audit_logs (user_id, action) VALUES (?,?)");
+        $act = "Set school year ID {$sy_id} as active (all others archived)";
+        $log->bind_param('is', $uid, $act); $log->execute();
+
+        echo json_encode(['success' => true]);
+        exit;
+    }
+
     echo json_encode(['error' => 'Unknown action.']); exit;
 }
 
@@ -60,6 +141,13 @@ while ($sy = $syResult->fetch_assoc()) {
     $schoolYears[] = $sy;
     if ($sy['status'] === 'active') $activeSyId = $sy['sy_id'];
 }
+
+// ── Load teachers for section modal ─────────────────────────────
+$teachersList = $conn->query("
+    SELECT t.teacher_id, u.full_name
+    FROM teachers t JOIN users u ON t.user_id = u.user_id
+    WHERE u.status='active' ORDER BY u.full_name ASC
+")->fetch_all(MYSQLI_ASSOC);
 
 // ── Load all fees for active SY ───────────────────────────────────
 $selectedSyId = intval($_GET['sy_id'] ?? $activeSyId);
@@ -244,15 +332,37 @@ body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f
 <div class="main">
     <div class="page-header">
         <h2>📂 Tuition Assessment</h2>
-        <div class="sy-selector">
-            <label for="sySelect">School Year:</label>
-            <select id="sySelect" onchange="window.location.href='tuition_assessment.php?sy_id='+this.value">
-                <?php foreach ($schoolYears as $sy): ?>
-                <option value="<?= $sy['sy_id'] ?>" <?= $sy['sy_id'] == $selectedSyId ? 'selected' : '' ?>>
-                    SY <?= htmlspecialchars($sy['name']) ?><?= $sy['status'] === 'active' ? ' ✓' : '' ?>
-                </option>
-                <?php endforeach; ?>
-            </select>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <div class="sy-selector">
+                <label for="sySelect">School Year:</label>
+                <select id="sySelect" onchange="window.location.href='tuition_assessment.php?sy_id='+this.value">
+                    <?php foreach ($schoolYears as $sy): ?>
+                    <option value="<?= $sy['sy_id'] ?>" <?= $sy['sy_id'] == $selectedSyId ? 'selected' : '' ?>>
+                        SY <?= htmlspecialchars($sy['name']) ?><?= $sy['status'] === 'active' ? ' ✓ Active' : ' · Archived' ?>
+                    </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php
+            $selectedIsActive = false;
+            foreach ($schoolYears as $sy) {
+                if ($sy['sy_id'] == $selectedSyId && $sy['status'] === 'active') { $selectedIsActive = true; break; }
+            }
+            ?>
+            <?php if (!$selectedIsActive): ?>
+            <button onclick="setActiveSY(<?= $selectedSyId ?>)"
+                style="padding:8px 14px;background:#198754;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;">
+                ✓ Set as Active
+            </button>
+            <?php endif; ?>
+            <button onclick="openAddSY()"
+                style="padding:8px 14px;background:#0077b6;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;">
+                ＋ New School Year
+            </button>
+            <button onclick="openAddSection()"
+                style="padding:8px 14px;background:#6d28d9;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-family:inherit;">
+                ＋ Add Section
+            </button>
         </div>
     </div>
 
@@ -438,6 +548,182 @@ function showToast(msg) {
 document.getElementById('modalOverlay').addEventListener('click', function(e) {
     if (e.target === this) closeModal();
 });
+
+// ── Add Section ──────────────────────────────────────────────────
+function openAddSection() {
+    document.getElementById('addSectionOverlay').classList.add('open');
+    document.getElementById('secName').focus();
+    document.getElementById('addSecError').style.display = 'none';
+}
+function closeAddSection() {
+    document.getElementById('addSectionOverlay').classList.remove('open');
+}
+async function submitAddSection() {
+    const grade   = document.getElementById('secGrade').value;
+    const name    = document.getElementById('secName').value.trim();
+    const teacher = document.getElementById('secTeacher').value;
+    const sy      = document.getElementById('secSY').value;
+    const errBox  = document.getElementById('addSecError');
+
+    if (!grade || !name) {
+        errBox.textContent = 'Grade level and section name are required.';
+        errBox.style.display = 'block'; return;
+    }
+
+    const body = new FormData();
+    body.append('action',       'add_section');
+    body.append('grade_level',  grade);
+    body.append('section_name', name);
+    body.append('teacher_id',   teacher);
+    body.append('sy_id',        sy);
+
+    const res  = await fetch('tuition_assessment.php', { method: 'POST', body });
+    const data = await res.json();
+
+    if (data.success) {
+        showToast('Section "' + name + '" added to Grade ' + grade + '!');
+        closeAddSection();
+        document.getElementById('secName').value    = '';
+        document.getElementById('secGrade').value   = '';
+        document.getElementById('secTeacher').value = '';
+    } else {
+        errBox.textContent = data.error || 'Could not add section.';
+        errBox.style.display = 'block';
+    }
+}
+document.getElementById('addSectionOverlay').addEventListener('click', function(e) {
+    if (e.target === this) closeAddSection();
+});
+
+// ── Add School Year ──────────────────────────────────────────────
+function openAddSY() {
+    document.getElementById('addSYOverlay').classList.add('open');
+    document.getElementById('syNameInput').focus();
+    document.getElementById('addSYError').style.display = 'none';
+}
+function closeAddSY() {
+    document.getElementById('addSYOverlay').classList.remove('open');
+}
+async function submitAddSY() {
+    const name   = document.getElementById('syNameInput').value.trim();
+    const errBox = document.getElementById('addSYError');
+
+    if (!name) {
+        errBox.textContent = 'School year name is required.';
+        errBox.style.display = 'block'; return;
+    }
+
+    const body = new FormData();
+    body.append('action', 'add_school_year');
+    body.append('name',   name);
+
+    const res  = await fetch('tuition_assessment.php', { method: 'POST', body });
+    const data = await res.json();
+
+    if (data.success) {
+        showToast('School year ' + name + ' created! Redirecting…');
+        closeAddSY();
+        setTimeout(() => {
+            window.location.href = 'tuition_assessment.php?sy_id=' + data.sy_id;
+        }, 900);
+    } else {
+        errBox.textContent = data.error || 'Could not create school year.';
+        errBox.style.display = 'block';
+    }
+}
+document.getElementById('addSYOverlay').addEventListener('click', function(e) {
+    if (e.target === this) closeAddSY();
+});
+
+// ── Set Active School Year (archive current, activate selected) ──
+async function setActiveSY(sy_id) {
+    if (!confirm('Set this school year as Active? All other school years will be archived.')) return;
+    const body = new FormData();
+    body.append('action', 'set_active_sy');
+    body.append('sy_id',  sy_id);
+    const res  = await fetch('tuition_assessment.php', { method: 'POST', body });
+    const data = await res.json();
+    if (data.success) {
+        showToast('School year set as active. Reloading…');
+        setTimeout(() => location.reload(), 800);
+    } else {
+        showToast('Error: ' + (data.error || 'Unknown'));
+    }
+}
+
 </script>
+
+<!-- ===== ADD SECTION MODAL ===== -->
+<div class="modal-overlay" id="addSectionOverlay">
+    <div class="modal">
+        <h3>＋ Add New Section</h3>
+        <p style="font-size:13px;color:#64748b;margin:-10px 0 18px;">The new section will be added to the selected school year. Students enrolled in it will automatically receive the tuition fees for their grade group.</p>
+
+        <div class="form-field">
+            <label>Grade Level</label>
+            <select id="secGrade" required>
+                <option value="">— Select grade —</option>
+                <?php for ($g = 1; $g <= 12; $g++): ?>
+                <option value="<?= $g ?>"><?= $g ?></option>
+                <?php endfor; ?>
+            </select>
+        </div>
+
+        <div class="form-field">
+            <label>Section Name</label>
+            <input type="text" id="secName" placeholder="e.g. Mabini, STEM-B, ABM-A">
+        </div>
+
+        <div class="form-field">
+            <label>Assign Teacher <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#94a3b8;">(optional)</span></label>
+            <select id="secTeacher">
+                <option value="">— Unassigned —</option>
+                <?php foreach ($teachersList as $t): ?>
+                <option value="<?= $t['teacher_id'] ?>"><?= htmlspecialchars($t['full_name']) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+
+        <div class="form-field">
+            <label>School Year</label>
+            <select id="secSY">
+                <?php foreach ($schoolYears as $sy): ?>
+                <option value="<?= $sy['sy_id'] ?>" <?= $sy['sy_id'] == $selectedSyId ? 'selected' : '' ?>>
+                    SY <?= htmlspecialchars($sy['name']) ?><?= $sy['status']==='active' ? ' ✓' : '' ?>
+                </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+
+        <div id="addSecError" style="display:none;background:#fee2e2;border-left:4px solid #ef4444;color:#b91c1c;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:12px;"></div>
+
+        <div class="modal-actions">
+            <button class="btn-close" onclick="closeAddSection()">Cancel</button>
+            <button class="btn-save" onclick="submitAddSection()">Add Section</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== ADD SCHOOL YEAR MODAL ===== -->
+<div class="modal-overlay" id="addSYOverlay">
+    <div class="modal">
+        <h3>＋ New School Year</h3>
+        <p style="font-size:13px;color:#64748b;margin:-10px 0 18px;">Adding a new school year will not affect existing data. You can set it as active once you're ready. Tuition fees must be configured separately for the new year.</p>
+
+        <div class="form-field">
+            <label>School Year Name</label>
+            <input type="text" id="syNameInput" placeholder="e.g. 2026-2027" maxlength="9">
+            <div style="font-size:12px;color:#94a3b8;margin-top:4px;">Format: YYYY-YYYY</div>
+        </div>
+
+        <div id="addSYError" style="display:none;background:#fee2e2;border-left:4px solid #ef4444;color:#b91c1c;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:12px;"></div>
+
+        <div class="modal-actions">
+            <button class="btn-close" onclick="closeAddSY()">Cancel</button>
+            <button class="btn-save" onclick="submitAddSY()">Create School Year</button>
+        </div>
+    </div>
+</div>
+
 </body>
 </html>
