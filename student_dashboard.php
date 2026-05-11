@@ -58,14 +58,10 @@ if ($role === 'student') {
         $account_id = $student['account_id'];
         $balance    = getBalance($conn, $account_id);
 
-        // Ledger — fee-level breakdown (CHARGEs linked to tuition_fees)
+        // Ledger
         $lStmt = $conn->prepare("
             SELECT
-                sl.ledger_id,
-                sl.entry_type,
-                sl.amount,
-                sl.remarks,
-                sl.created_at,
+                sl.ledger_id, sl.entry_type, sl.amount, sl.remarks, sl.created_at,
                 tf.label AS fee_label
             FROM student_ledgers sl
             LEFT JOIN tuition_fees tf ON sl.fee_id = tf.fee_id
@@ -78,9 +74,8 @@ if ($role === 'student') {
 
         // Payment history
         $pStmt = $conn->prepare("
-            SELECT
-                p.payment_date, p.amount, p.method, p.or_number,
-                u.full_name AS processed_by
+            SELECT p.payment_date, p.amount, p.method, p.or_number,
+                   u.full_name AS processed_by
             FROM payments p
             JOIN users u ON p.posted_by = u.user_id
             WHERE p.account_id = ?
@@ -89,14 +84,28 @@ if ($role === 'student') {
         $pStmt->bind_param('i', $account_id);
         $pStmt->execute();
         $payments = $pStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+        // ── Payment proofs submitted by this student ──────────────
+        $ppStmt = $conn->prepare("
+            SELECT proof_id, amount, method, reference, status, submitted_at, admin_note
+            FROM payment_proofs
+            WHERE student_id = ? AND account_id = ?
+            ORDER BY submitted_at DESC
+        ");
+        $ppStmt->bind_param('ii', $student['student_id'], $account_id);
+        $ppStmt->execute();
+        $proofs = $ppStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+        // Check if there's already a pending proof (limit 1 at a time)
+        $hasPending = !empty(array_filter($proofs, fn($p) => $p['status'] === 'pending'));
     }
 }
 
 // ── Totals for ledger summary ────────────────────────────────────
-$totalCharged  = array_sum(array_column(array_filter($ledger, fn($r) => $r['entry_type'] === 'CHARGE'),  'amount'));
-$totalPaid     = array_sum(array_column(array_filter($ledger, fn($r) => $r['entry_type'] === 'PAYMENT'), 'amount'));
-$totalDiscount = array_sum(array_column(array_filter($ledger, fn($r) => $r['entry_type'] === 'DISCOUNT'),'amount'));
-$totalPenalty  = array_sum(array_column(array_filter($ledger, fn($r) => $r['entry_type'] === 'PENALTY'), 'amount'));
+$totalCharged  = array_sum(array_column(array_filter($ledger, fn($r) => $r['entry_type'] === 'CHARGE'),   'amount'));
+$totalPaid     = array_sum(array_column(array_filter($ledger, fn($r) => $r['entry_type'] === 'PAYMENT'),  'amount'));
+$totalDiscount = array_sum(array_column(array_filter($ledger, fn($r) => $r['entry_type'] === 'DISCOUNT'), 'amount'));
+$totalPenalty  = array_sum(array_column(array_filter($ledger, fn($r) => $r['entry_type'] === 'PENALTY'),  'amount'));
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -210,7 +219,6 @@ tr:hover td { background: #f8faff; }
 .method-Bank-Transfer { background: #f3e8ff; color: #6b21a8; }
 
 .empty-msg { text-align: center; color: #94a3b8; padding: 32px; font-size: 14px; }
-
 .total-row td { font-weight: 700; background: #f8fafc; border-top: 2px solid #e2e8f0; }
 
 /* ===== TEACHER VIEW ===== */
@@ -220,13 +228,79 @@ tr:hover td { background: #f8faff; }
 }
 .teacher-card h3 { color: #0f2027; margin-bottom: 8px; }
 .teacher-card p  { color: #64748b; font-size: 14px; }
+
+/* ===== PAYMENT PROOF UPLOAD ===== */
+.proof-section {
+    background: white; border-radius: 14px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    overflow: hidden; margin-bottom: 28px;
+}
+.proof-section-head {
+    background: linear-gradient(90deg, #0f2027, #1a3a35);
+    color: white; padding: 16px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+}
+.proof-section-head h3 { margin: 0; font-size: 16px; }
+.proof-section-head span { font-size: 12px; color: rgba(255,255,255,0.5); }
+.proof-body { padding: 24px; }
+
+.proof-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.proof-form-grid.single { grid-template-columns: 1fr; }
+.form-group label { display: block; font-size: 12px; font-weight: 600; color: #374151; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.4px; }
+.form-group input,
+.form-group select,
+.form-group textarea { width: 100%; padding: 9px 12px; border: 1.5px solid #cbd5e1; border-radius: 7px; font-size: 14px; font-family: inherit; }
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus { outline: none; border-color: #0f6e56; box-shadow: 0 0 0 3px rgba(15,110,86,0.1); }
+.form-group textarea { resize: vertical; min-height: 70px; }
+
+.file-drop {
+    border: 2px dashed #cbd5e1; border-radius: 10px; padding: 28px;
+    text-align: center; cursor: pointer; transition: all 0.2s; background: #f8fafc;
+    margin-bottom: 14px;
+}
+.file-drop:hover, .file-drop.dragover { border-color: #0f6e56; background: #f0fdf4; }
+.file-drop .icon { font-size: 32px; margin-bottom: 8px; }
+.file-drop p { margin: 0; font-size: 13px; color: #64748b; }
+.file-drop .hint { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+#filePreview { max-width: 100%; max-height: 200px; border-radius: 8px; margin-top: 12px; display: none; }
+
+.btn-submit-proof {
+    padding: 11px 28px; background: #0f6e56; color: white; border: none;
+    border-radius: 8px; cursor: pointer; font-size: 14px; font-family: inherit;
+    font-weight: 600; transition: background 0.18s; width: 100%;
+}
+.btn-submit-proof:hover { background: #0a5242; }
+.btn-submit-proof:disabled { background: #94a3b8; cursor: not-allowed; }
+
+.pending-notice {
+    background: #fffbeb; border: 1px solid #fcd34d; border-radius: 10px;
+    padding: 16px 20px; display: flex; gap: 12px; align-items: flex-start;
+}
+.pending-notice .icon { font-size: 20px; flex-shrink: 0; }
+.pending-notice h4 { margin: 0 0 4px; font-size: 14px; color: #92400e; }
+.pending-notice p  { margin: 0; font-size: 13px; color: #b45309; }
+
+/* Proof history badges */
+.badge-pending   { background: #fef3c7; color: #92400e;  padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+.badge-confirmed { background: #d1fae5; color: #065f46;  padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+.badge-rejected  { background: #fee2e2; color: #991b1b;  padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+
+/* Toast */
+.toast {
+    position: fixed; bottom: 28px; right: 28px; background: #0f2027; color: white;
+    padding: 13px 22px; border-radius: 10px; font-size: 14px; z-index: 999;
+    opacity: 0; transform: translateY(10px); transition: all 0.3s; pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
 </style>
 </head>
 <body>
 
 <!-- ===== NAVBAR ===== -->
 <nav class="navbar">
-    <a href="user_dashboard.php" class="navbar-brand">
+    <a href="student_dashboard.php" class="navbar-brand">
         <h2>CATMIS</h2>
         <span>CCS Portal</span>
     </a>
@@ -303,7 +377,7 @@ tr:hover td { background: #f8faff; }
         </div>
     </div>
 
-    <!-- ===== SUMMARY CARDS ===== -->
+    <!-- ===== SUMMARY CARDS ===== */
     <div class="summary-cards">
         <div class="sum-card">
             <h4>Total Assessment</h4>
@@ -327,6 +401,107 @@ tr:hover td { background: #f8faff; }
         <?php endif; ?>
     </div>
 
+    <!-- ===== PAYMENT PROOF UPLOAD ===== -->
+    <?php if ($balance > 0): ?>
+    <div class="section-header">📤 Submit Payment Proof</div>
+    <div class="proof-section">
+        <div class="proof-section-head">
+            <h3>Upload Payment Screenshot</h3>
+            <span>GCash, bank transfer, or any digital payment</span>
+        </div>
+        <div class="proof-body">
+
+            <?php if ($hasPending): ?>
+            <!-- Already has a pending proof -->
+            <div class="pending-notice">
+                <div class="icon">⏳</div>
+                <div>
+                    <h4>Proof Already Submitted</h4>
+                    <p>Your payment proof is currently being reviewed by the admin. You'll be notified once it's confirmed. Please check back later or contact the school office.</p>
+                </div>
+            </div>
+
+            <?php else: ?>
+            <!-- Upload form -->
+            <div class="proof-form-grid">
+                <div class="form-group">
+                    <label>Amount Paid (₱)</label>
+                    <input type="number" id="proofAmount" min="1" step="0.01"
+                           max="<?= $balance ?>"
+                           placeholder="e.g. <?= number_format($balance, 2) ?>"
+                           value="<?= $balance ?>">
+                </div>
+                <div class="form-group">
+                    <label>Payment Method</label>
+                    <select id="proofMethod">
+                        <option value="GCash">GCash</option>
+                        <option value="Bank Transfer">Bank Transfer</option>
+                    </select>
+                </div>
+            </div>
+            <div class="proof-form-grid">
+                <div class="form-group">
+                    <label>Reference / Transaction Number</label>
+                    <input type="text" id="proofRef" placeholder="e.g. 1234567890">
+                </div>
+                <div class="form-group">
+                    <label>Note <span style="font-weight:400;color:#94a3b8;">(optional)</span></label>
+                    <input type="text" id="proofNote" placeholder="Any additional info…">
+                </div>
+            </div>
+
+            <!-- File drop zone -->
+            <div class="file-drop" id="fileDrop" onclick="document.getElementById('proofFile').click()">
+                <div class="icon">📎</div>
+                <p>Click to attach your payment screenshot</p>
+                <div class="hint">JPG, PNG, WebP, or PDF · Max 5MB</div>
+                <img id="filePreview" alt="Preview">
+            </div>
+            <input type="file" id="proofFile" accept="image/jpeg,image/png,image/webp,application/pdf"
+                   style="display:none" onchange="previewFile(this)">
+
+            <button class="btn-submit-proof" id="submitProofBtn" onclick="submitProof()">
+                📤 Submit Payment Proof
+            </button>
+            <?php endif; ?>
+
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <!-- ===== PROOF HISTORY ===== -->
+    <?php if (!empty($proofs)): ?>
+    <div class="section-header">📋 Proof Submission History</div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Submitted</th>
+                    <th>Amount</th>
+                    <th>Method</th>
+                    <th>Reference</th>
+                    <th>Status</th>
+                    <th>Admin Note</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php foreach ($proofs as $pr): ?>
+            <tr>
+                <td style="font-size:13px;color:#64748b;">
+                    <?= date('M d, Y h:i A', strtotime($pr['submitted_at'])) ?>
+                </td>
+                <td class="amount-col">₱<?= number_format($pr['amount'], 2) ?></td>
+                <td><?= htmlspecialchars($pr['method']) ?></td>
+                <td style="font-family:monospace;font-size:13px;"><?= htmlspecialchars($pr['reference'] ?: '—') ?></td>
+                <td><span class="badge-<?= $pr['status'] ?>"><?= ucfirst($pr['status']) ?></span></td>
+                <td style="font-size:13px;color:#64748b;"><?= htmlspecialchars($pr['admin_note'] ?: '—') ?></td>
+            </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php endif; ?>
+
     <!-- ===== FEE BREAKDOWN ===== -->
     <div class="section-header">Fee Breakdown</div>
     <div class="table-wrap">
@@ -346,16 +521,12 @@ tr:hover td { background: #f8faff; }
                 <?php foreach ($ledger as $entry): ?>
                 <tr>
                     <td>
-                        <?php if ($entry['fee_label']): ?>
-                            <?= htmlspecialchars($entry['fee_label']) ?>
-                        <?php else: ?>
-                            <?= htmlspecialchars($entry['remarks'] ?? '—') ?>
-                        <?php endif; ?>
+                        <?= htmlspecialchars($entry['fee_label'] ?: ($entry['remarks'] ?? '—')) ?>
                     </td>
                     <td><span class="entry-badge entry-<?= $entry['entry_type'] ?>"><?= $entry['entry_type'] ?></span></td>
                     <td class="amount-col">
                         <?php
-                            $sign = in_array($entry['entry_type'], ['PAYMENT','DISCOUNT']) ? '−' : '+';
+                            $sign  = in_array($entry['entry_type'], ['PAYMENT','DISCOUNT']) ? '−' : '+';
                             $color = in_array($entry['entry_type'], ['PAYMENT','DISCOUNT']) ? '#198754' : ($entry['entry_type'] === 'PENALTY' ? '#dc2626' : '#0f2027');
                         ?>
                         <span style="color:<?= $color ?>"><?= $sign ?>₱<?= number_format($entry['amount'], 2) ?></span>
@@ -416,5 +587,98 @@ tr:hover td { background: #f8faff; }
 <?php endif; ?>
 </div>
 
+<div class="toast" id="toast"></div>
+
+<script>
+// ── File preview ──────────────────────────────────────────────────
+function previewFile(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const drop = document.getElementById('fileDrop');
+    const preview = document.getElementById('filePreview');
+
+    if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = e => {
+            preview.src = e.target.result;
+            preview.style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+    } else {
+        preview.style.display = 'none';
+    }
+
+    drop.querySelector('p').textContent = '📎 ' + file.name;
+    drop.querySelector('.hint').textContent = (file.size / 1024).toFixed(1) + ' KB';
+}
+
+// ── Drag and drop ─────────────────────────────────────────────────
+const dropZone = document.getElementById('fileDrop');
+if (dropZone) {
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        const file = e.dataTransfer.files[0];
+        if (file) {
+            const input = document.getElementById('proofFile');
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            input.files = dt.files;
+            previewFile(input);
+        }
+    });
+}
+
+// ── Submit proof ──────────────────────────────────────────────────
+async function submitProof() {
+    const amount  = parseFloat(document.getElementById('proofAmount').value);
+    const method  = document.getElementById('proofMethod').value;
+    const ref     = document.getElementById('proofRef').value.trim();
+    const note    = document.getElementById('proofNote').value.trim();
+    const file    = document.getElementById('proofFile').files[0];
+
+    if (!amount || amount <= 0)  { showToast('Please enter a valid amount.', true); return; }
+    if (!file)                   { showToast('Please attach your payment screenshot.', true); return; }
+
+    const btn = document.getElementById('submitProofBtn');
+    btn.textContent = '⏳ Uploading…'; btn.disabled = true;
+
+    const body = new FormData();
+    body.append('action',      'submit_proof');
+    body.append('account_id',  '<?= $account_id ?? 0 ?>');
+    body.append('amount',      amount);
+    body.append('method',      method);
+    body.append('reference',   ref);
+    body.append('note',        note);
+    body.append('proof_file',  file);
+
+    try {
+        const res  = await fetch('php/payment_proof.php', { method: 'POST', body });
+        const data = await res.json();
+
+        if (data.error) {
+            showToast('⚠ ' + data.error, true);
+            btn.textContent = '📤 Submit Payment Proof'; btn.disabled = false;
+        } else {
+            showToast('✓ Proof submitted! Admin will verify soon.');
+            setTimeout(() => location.reload(), 2000);
+        }
+    } catch (e) {
+        showToast('⚠ Network error. Please try again.', true);
+        btn.textContent = '📤 Submit Payment Proof'; btn.disabled = false;
+    }
+}
+
+function showToast(msg, isError = false) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.background = isError ? '#dc2626' : '#0f2027';
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 4000);
+}
+</script>
 </body>
 </html>
