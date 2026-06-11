@@ -572,8 +572,9 @@ function exportExcel() {
     const ws = XLSX.utils.aoa_to_sheet(data);
     ws['!cols'] = [{wch:4},{wch:28},{wch:14},{wch:10},{wch:24}];
     XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
-    XLSX.writeFile(wb, 'Attendance_<?= addslashes($currentSection['section_name'] ?? '') ?>_<?= $selectedDate ?>.xlsx');
+    previewAndExport(wb, 'Attendance_<?= addslashes($currentSection['section_name'] ?? '') ?>_<?= $selectedDate ?>.xlsx');
 }
 </script>
+<script src="js/export_preview_modal.js"></script>
 </body>
 </html>

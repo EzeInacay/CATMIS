@@ -24,6 +24,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         echo json_encode(['error' => 'Invalid request.']); exit;
     }
 
+    // Password required only for confirming (financial record)
+    if ($decision === 'confirmed') {
+        $raw     = $_POST['confirm_password'] ?? '';
+        $adminRow = $conn->prepare("SELECT password FROM users WHERE user_id=?");
+        $adminRow->bind_param('i', $admin_id); $adminRow->execute();
+        $adminPw  = $adminRow->get_result()->fetch_assoc()['password'];
+        if (!password_verify($raw, $adminPw)) {
+            echo json_encode(['error' => 'Incorrect password. Payment not confirmed.']); exit;
+        }
+    }
+
     // Fetch proof + student info
     $pStmt = $conn->prepare("
         SELECT pp.*, u.full_name, u.email, u.student_number
@@ -165,6 +176,7 @@ $unreadNotifs = $_nRes->get_result()->fetch_assoc()['cnt'] ?? 0;
 <title>Payment History | CATMIS</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="js/export_preview_modal.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; }
 body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f4; }
@@ -466,31 +478,96 @@ tr:hover td { background: #f8faff; }
     <img id="lightboxImg" src="" alt="Payment proof">
 </div>
 
+<!-- ===== PASSWORD CONFIRM MODAL (payment confirmation) ===== -->
+<div style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:500;align-items:center;justify-content:center;" id="pwConfirmOverlay">
+    <div style="background:#fff;border-radius:14px;padding:32px 36px;width:100%;max-width:380px;box-shadow:0 12px 40px rgba(0,0,0,0.18);">
+        <h3 style="margin:0 0 6px;font-size:18px;color:#0f2027;">Confirm Payment</h3>
+        <p style="font-size:14px;color:#475569;margin:0 0 20px;">Enter your admin password to post this payment to the ledger. This will generate an OR number and email the student.</p>
+        <div style="margin-bottom:16px;">
+            <label style="display:block;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;margin-bottom:5px;">Your Admin Password</label>
+            <input type="password" id="pwConfirmInput" placeholder="••••••••" autocomplete="current-password"
+                   style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
+            <span id="pwConfirmError" style="color:#dc2626;font-size:12px;margin-top:5px;display:none;"></span>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:4px;">
+            <button onclick="closePwConfirm()" style="padding:11px 20px;background:#f1f5f9;color:#64748b;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit;">Cancel</button>
+            <button id="pwConfirmBtn" style="flex:1;padding:11px;background:#16a34a;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;">✅ Confirm Payment</button>
+        </div>
+    </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
+// ── Password confirm modal ─────────────────────────────────────
+let _pwProofId = null;
+
+function closePwConfirm() {
+    const overlay = document.getElementById('pwConfirmOverlay');
+    overlay.style.display = 'none';
+    _pwProofId = null;
+}
+
+document.getElementById('pwConfirmBtn').addEventListener('click', async function () {
+    const pw  = document.getElementById('pwConfirmInput').value;
+    const err = document.getElementById('pwConfirmError');
+    if (!pw) { err.textContent = 'Please enter your password.'; err.style.display = 'block'; return; }
+    await _submitReview(_pwProofId, 'confirmed', pw);
+});
+
+document.getElementById('pwConfirmInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') document.getElementById('pwConfirmBtn').click();
+});
+
+document.getElementById('pwConfirmOverlay').addEventListener('click', function(e) {
+    if (e.target === this) closePwConfirm();
+});
+
 // ── Proof review ──────────────────────────────────────────────────
 async function reviewProof(proofId, decision) {
+    if (decision === 'confirmed') {
+        // Require password before confirming
+        _pwProofId = proofId;
+        document.getElementById('pwConfirmInput').value = '';
+        document.getElementById('pwConfirmError').style.display = 'none';
+        const overlay = document.getElementById('pwConfirmOverlay');
+        overlay.style.display = 'flex';
+        setTimeout(() => document.getElementById('pwConfirmInput').focus(), 80);
+        return;
+    }
+    // Rejection — no password needed
+    await _submitReview(proofId, decision, '');
+}
+
+async function _submitReview(proofId, decision, confirmPassword) {
     const note    = document.getElementById('note-' + proofId)?.value || '';
     const card    = document.getElementById('proofCard-' + proofId);
     const buttons = card.querySelectorAll('button');
     buttons.forEach(b => b.disabled = true);
 
     const body = new FormData();
-    body.append('action',     'review_proof');
-    body.append('proof_id',   proofId);
-    body.append('decision',   decision);
-    body.append('admin_note', note);
+    body.append('action',           'review_proof');
+    body.append('proof_id',         proofId);
+    body.append('decision',         decision);
+    body.append('admin_note',       note);
+    body.append('confirm_password', confirmPassword);
 
     const res  = await fetch('payment_history.php', { method: 'POST', body });
     const data = await res.json();
 
     if (data.error) {
-        showToast('⚠ ' + data.error, true);
+        if (decision === 'confirmed') {
+            const err = document.getElementById('pwConfirmError');
+            err.textContent = data.error;
+            err.style.display = 'block';
+        } else {
+            showToast('⚠ ' + data.error, true);
+        }
         buttons.forEach(b => b.disabled = false);
         return;
     }
 
+    if (decision === 'confirmed') closePwConfirm();
     showToast('✓ ' + data.message);
 
     // Animate card out
@@ -550,7 +627,7 @@ function exportExcel() {
     const ws = XLSX.utils.aoa_to_sheet(data);
     ws['!cols'] = [{wch:14},{wch:26},{wch:18},{wch:14},{wch:16},{wch:18},{wch:22}];
     XLSX.utils.book_append_sheet(wb, ws, 'Payment History');
-    XLSX.writeFile(wb, `CATMIS_Payments_${new Date().toISOString().slice(0,10)}.xlsx`);
+    previewAndExport(wb, `CATMIS_Payments_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 // ── Lightbox ──────────────────────────────────────────────────────

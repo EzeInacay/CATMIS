@@ -142,6 +142,34 @@ body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f
 
 .success-banner { background: #d1fae5; border-left: 4px solid #10b981; color: #065f46; padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 24px; }
 .error-banner   { background: #fef2f2; border-left: 4px solid #ef4444; color: #b91c1c; padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 24px; }
+
+/* ===== RECEIPT ===== */
+.receipt { background: #fff; border: 1.5px solid #d1fae5; border-radius: 12px; margin-bottom: 24px; overflow: hidden; box-shadow: 0 2px 12px rgba(16,185,129,0.08); }
+.receipt-header { background: linear-gradient(90deg, #065f46, #047857); padding: 18px 22px; display: flex; align-items: center; gap: 14px; }
+.receipt-icon { width: 36px; height: 36px; background: rgba(255,255,255,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 18px; font-weight: 700; flex-shrink: 0; }
+.receipt-title { color: #fff; font-size: 15px; font-weight: 700; }
+.receipt-subtitle { color: rgba(255,255,255,0.65); font-size: 11px; margin-top: 2px; }
+.receipt-body { padding: 6px 0; }
+.receipt-row { display: flex; justify-content: space-between; align-items: center; padding: 11px 22px; border-bottom: 1px solid #f1f5f9; gap: 12px; }
+.receipt-row:last-child { border-bottom: none; }
+.receipt-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; flex-shrink: 0; }
+.receipt-value { font-size: 14px; color: #0f2027; font-weight: 500; text-align: right; }
+.receipt-or { font-family: monospace; font-size: 13px; letter-spacing: 1px; background: #f8fafc; padding: 2px 8px; border-radius: 4px; }
+.receipt-amount { font-size: 20px; font-weight: 700; color: #0f2027; }
+.receipt-paid { color: #065f46; }
+.receipt-due  { color: #b91c1c; }
+.receipt-badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; margin-left: 8px; vertical-align: middle; }
+.badge-paid { background: #d1fae5; color: #065f46; }
+.badge-due  { background: #fef3c7; color: #92400e; }
+.receipt-actions { padding: 14px 22px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; gap: 10px; }
+.btn-print { padding: 8px 18px; background: #0f2027; color: #fff; border: none; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.18s; }
+.btn-print:hover { background: #203a43; }
+
+@media print {
+    .navbar, .student-info-bar, form, .receipt-actions { display: none !important; }
+    body { background: white; }
+    .receipt { box-shadow: none; border: 1px solid #ccc; }
+}
 </style>
 </head>
 <body>
@@ -184,7 +212,54 @@ body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f
     </div>
 
     <?php if ($success === '1'): ?>
-        <div class="success-banner">✅ Payment posted successfully!</div>
+    <?php
+        $rcpt_or     = htmlspecialchars($_GET['or']  ?? '—');
+        $rcpt_amt    = htmlspecialchars($_GET['amt'] ?? '—');
+        $rcpt_mth    = htmlspecialchars($_GET['mth'] ?? '—');
+        $rcpt_date   = date('F j, Y · g:i A');
+        $rcpt_name   = htmlspecialchars($data['full_name'] ?? '—');
+        $rcpt_grade  = htmlspecialchars($data['grade_level'] ?? '');
+        $rcpt_sec    = htmlspecialchars($data['section'] ?? '');
+        $rcpt_bal    = number_format($data['balance'], 2);
+        $fully_paid  = floatval($data['balance']) <= 0;
+    ?>
+    <div class="receipt">
+        <div class="receipt-header">
+            <div class="receipt-icon">✓</div>
+            <div>
+                <div class="receipt-title">Payment Posted</div>
+                <div class="receipt-subtitle"><?= $rcpt_date ?></div>
+            </div>
+        </div>
+        <div class="receipt-body">
+            <div class="receipt-row">
+                <span class="receipt-label">Student</span>
+                <span class="receipt-value"><?= $rcpt_name ?><?= $rcpt_grade ? " · Grade {$rcpt_grade}" : '' ?><?= $rcpt_sec ? " – {$rcpt_sec}" : '' ?></span>
+            </div>
+            <div class="receipt-row">
+                <span class="receipt-label">OR Number</span>
+                <span class="receipt-value receipt-or"><?= $rcpt_or ?></span>
+            </div>
+            <div class="receipt-row">
+                <span class="receipt-label">Amount Paid</span>
+                <span class="receipt-value receipt-amount">₱<?= $rcpt_amt ?></span>
+            </div>
+            <div class="receipt-row">
+                <span class="receipt-label">Method</span>
+                <span class="receipt-value"><?= $rcpt_mth ?></span>
+            </div>
+            <div class="receipt-row">
+                <span class="receipt-label">Remaining Balance</span>
+                <span class="receipt-value <?= $fully_paid ? 'receipt-paid' : 'receipt-due' ?>">
+                    ₱<?= $rcpt_bal ?>
+                    <span class="receipt-badge <?= $fully_paid ? 'badge-paid' : 'badge-due' ?>"><?= $fully_paid ? 'Fully Paid' : 'Balance Due' ?></span>
+                </span>
+            </div>
+        </div>
+        <div class="receipt-actions">
+            <button onclick="window.print()" class="btn-print">🖨 Print Receipt</button>
+        </div>
+    </div>
     <?php endif; ?>
 
     <?php if (isset($_GET['error'])): ?>

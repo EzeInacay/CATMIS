@@ -102,7 +102,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     // TOGGLE STATUS
     if ($action === 'toggle_status') {
-        $user_id = intval($_POST['user_id'] ?? 0);
+        $user_id  = intval($_POST['user_id'] ?? 0);
+        $raw      = $_POST['confirm_password'] ?? '';
+        $adminRow = $conn->prepare("SELECT password FROM users WHERE user_id=?");
+        $adminRow->bind_param('i', $_SESSION['user_id']); $adminRow->execute();
+        $adminPw  = $adminRow->get_result()->fetch_assoc()['password'];
+        if (!password_verify($raw, $adminPw)) {
+            echo json_encode(['error' => 'Incorrect password.']); exit;
+        }
         $stmt = $conn->prepare("UPDATE users SET status = IF(status='active','inactive','active') WHERE user_id=?");
         $stmt->bind_param('i', $user_id);
         $stmt->execute();
@@ -116,6 +123,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     // DELETE USER
     if ($action === 'delete_user') {
         $user_id = intval($_POST['user_id'] ?? 0);
+        $raw     = $_POST['confirm_password'] ?? '';
+        $adminRow = $conn->prepare("SELECT password FROM users WHERE user_id=?");
+        $adminRow->bind_param('i', $_SESSION['user_id']); $adminRow->execute();
+        $adminPw  = $adminRow->get_result()->fetch_assoc()['password'];
+        if (!password_verify($raw, $adminPw)) {
+            echo json_encode(['error' => 'Incorrect password.']); exit;
+        }
         // Prevent self-deletion
         if ($user_id === $_SESSION['user_id']) {
             echo json_encode(['error' => 'You cannot delete your own account.']); exit;
@@ -256,6 +270,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     echo json_encode(['error' => 'Unknown action.']); exit;
 }
 
+// ── Unread notifications count ───────────────────────────────────
+$_uid = $_SESSION['user_id'];
+$_nRes = $conn->prepare("SELECT COUNT(*) AS cnt FROM notifications WHERE admin_id=? AND is_read=0");
+$_nRes->bind_param('i', $_uid);
+$_nRes->execute();
+$unreadNotifs = $_nRes->get_result()->fetch_assoc()['cnt'] ?? 0;
+
 // ── Load users ───────────────────────────────────────────────────
 $users = $conn->query("
     SELECT user_id, student_number, full_name, email, role, status, created_at
@@ -290,7 +311,7 @@ body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f
 }
 .navbar-links a:hover { background: rgba(255,255,255,0.1); color: #fff; }
 .navbar-links a.active { background: rgba(255,255,255,0.15); color: #fff; }
-.navbar-right { margin-left: auto; flex-shrink: 0; }
+.navbar-right { margin-left: auto; flex-shrink: 0; display: flex; align-items: center; gap: 14px; }
 .logout-btn {
     background: #ff3b30; border: none; color: white; padding: 7px 16px;
     border-radius: 6px; cursor: pointer; font-size: 13px;
@@ -425,10 +446,16 @@ tr:hover td { background: #f8faff; }
         <a href="user_management.php" class="active">👥 Users</a>
         <a href="payment_history.php">📄 Payments</a>
         <a href="audit_logs.php">🕒 Audit Logs</a>
-        <a href="edit_requests_admin.php">📝 Edit Requests</a>
-        <a href="#">💾 Backup</a>
+        <a href="financial_report.php">📊 Reports</a>
+        <a href="backup.php">💾 Backup</a>
     </div>
     <div class="navbar-right">
+        <a href="notifications.php" style="text-decoration:none;position:relative;display:flex;align-items:center;">
+            <span style="font-size:20px;">🔔</span>
+            <?php if ($unreadNotifs > 0): ?>
+            <span style="position:absolute;top:-6px;right:-6px;background:#ff3b30;color:white;border-radius:50%;width:18px;height:18px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;"><?= min($unreadNotifs,99) ?></span>
+            <?php endif; ?>
+        </a>
         <button class="logout-btn" onclick="window.location.href='php/logout.php'">Logout</button>
     </div>
 </nav>
@@ -438,6 +465,10 @@ tr:hover td { background: #f8faff; }
     <div class="page-header">
         <h2>👥 User Management</h2>
         <div class="page-header-btns">
+            <a href="edit_requests_admin.php" class="btn btn-outline" id="editReqBtn">📝 Edit Requests<?php
+                $er = $conn->query("SELECT COUNT(*) AS cnt FROM edit_requests WHERE status='pending'")->fetch_assoc();
+                if (($er['cnt'] ?? 0) > 0) echo ' <span style="background:#dc2626;color:white;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;">' . $er['cnt'] . '</span>';
+            ?></a>
             <button class="btn btn-outline" onclick="downloadTemplate()">⬇ Export Template</button>
             <button class="btn btn-teal" onclick="document.getElementById('importFileInput').click()">📤 Import Excel</button>
             <input type="file" id="importFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleImport(this)">
@@ -556,10 +587,28 @@ tr:hover td { background: #f8faff; }
     </div>
 </div>
 
+<!-- ===== PASSWORD CONFIRM MODAL ===== -->
+<div class="modal-overlay" id="pwConfirmOverlay">
+    <div class="modal" style="max-width:380px;">
+        <h3 id="pwConfirmTitle">Confirm Action</h3>
+        <p id="pwConfirmDesc" style="font-size:14px;color:#475569;margin:-10px 0 18px;"></p>
+        <div class="form-field">
+            <label>Your Admin Password</label>
+            <input type="password" id="pwConfirmInput" placeholder="••••••••" autocomplete="current-password">
+            <span id="pwConfirmError" style="color:#dc2626;font-size:12px;margin-top:5px;display:none;"></span>
+        </div>
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="closePwConfirm()">Cancel</button>
+            <button class="btn-save" id="pwConfirmBtn" style="background:#dc2626;">Confirm</button>
+        </div>
+    </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <!-- SheetJS for Excel/CSV parsing -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="js/export_preview_modal.js"></script>
 
 <script>
 // ── Filter state ────────────────────────────────────────────────
@@ -644,49 +693,108 @@ async function saveUser() {
     }
 }
 
+// ── Password Confirm Modal ───────────────────────────────────────
+let _pwCallback = null;
+
+function openPwConfirm(title, desc, callback) {
+    document.getElementById('pwConfirmTitle').textContent  = title;
+    document.getElementById('pwConfirmDesc').textContent   = desc;
+    document.getElementById('pwConfirmInput').value        = '';
+    document.getElementById('pwConfirmError').style.display = 'none';
+    _pwCallback = callback;
+    document.getElementById('pwConfirmOverlay').classList.add('open');
+    setTimeout(() => document.getElementById('pwConfirmInput').focus(), 80);
+}
+
+function closePwConfirm() {
+    document.getElementById('pwConfirmOverlay').classList.remove('open');
+    _pwCallback = null;
+}
+
+document.getElementById('pwConfirmBtn').addEventListener('click', async function () {
+    const pw = document.getElementById('pwConfirmInput').value;
+    if (!pw) {
+        const err = document.getElementById('pwConfirmError');
+        err.textContent = 'Please enter your password.';
+        err.style.display = 'block';
+        return;
+    }
+    if (_pwCallback) await _pwCallback(pw);
+});
+
+document.getElementById('pwConfirmInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') document.getElementById('pwConfirmBtn').click();
+});
+
+document.getElementById('pwConfirmOverlay').addEventListener('click', function(e) {
+    if (e.target === this) closePwConfirm();
+});
+
 // ── Toggle status ───────────────────────────────────────────────
 async function toggleStatus(user_id) {
-    const body = new FormData();
-    body.append('action',  'toggle_status');
-    body.append('user_id', user_id);
+    const currentStatus = document.getElementById('status-' + user_id)?.textContent.trim().toLowerCase();
+    const action = currentStatus === 'active' ? 'Deactivate' : 'Activate';
+    openPwConfirm(
+        action + ' Account',
+        `Enter your admin password to ${action.toLowerCase()} this account.`,
+        async function(pw) {
+            const body = new FormData();
+            body.append('action',           'toggle_status');
+            body.append('user_id',          user_id);
+            body.append('confirm_password', pw);
 
-    const res  = await fetch('user_management.php', { method: 'POST', body });
-    const data = await res.json();
+            const res  = await fetch('user_management.php', { method: 'POST', body });
+            const data = await res.json();
 
-    if (data.success) {
-        const newStatus  = data.status;
-        const statusCell = document.getElementById('status-' + user_id);
-        const toggleBtn  = document.getElementById('toggle-' + user_id);
-        statusCell.innerHTML = `<span class="status-badge status-${newStatus}">${newStatus.charAt(0).toUpperCase() + newStatus.slice(1)}</span>`;
-        toggleBtn.textContent = newStatus === 'active' ? '🔒 Deactivate' : '✅ Activate';
-        showToast('Status updated to ' + newStatus + '.');
-    } else {
-        showToast('Could not update status.');
-    }
+            if (data.error) {
+                const err = document.getElementById('pwConfirmError');
+                err.textContent = data.error;
+                err.style.display = 'block';
+                return;
+            }
+
+            closePwConfirm();
+            const newStatus  = data.status;
+            const statusCell = document.getElementById('status-' + user_id);
+            const toggleBtn  = document.getElementById('toggle-' + user_id);
+            statusCell.innerHTML = `<span class="status-badge status-${newStatus}">${newStatus.charAt(0).toUpperCase() + newStatus.slice(1)}</span>`;
+            toggleBtn.textContent = newStatus === 'active' ? '🔒 Deactivate' : '✅ Activate';
+            showToast('Status updated to ' + newStatus + '.');
+        }
+    );
 }
 
 // ── Delete ──────────────────────────────────────────────────────
 async function deleteUser(user_id, name) {
-    if (!confirm(`Delete account for "${name}"? This cannot be undone.`)) return;
+    openPwConfirm(
+        'Delete Account',
+        `You are about to permanently delete "${name}". This cannot be undone.`,
+        async function(pw) {
+            const body = new FormData();
+            body.append('action',           'delete_user');
+            body.append('user_id',          user_id);
+            body.append('confirm_password', pw);
 
-    const body = new FormData();
-    body.append('action',  'delete_user');
-    body.append('user_id', user_id);
+            const res  = await fetch('user_management.php', { method: 'POST', body });
+            const data = await res.json();
 
-    const res  = await fetch('user_management.php', { method: 'POST', body });
-    const data = await res.json();
+            if (data.error) {
+                const err = document.getElementById('pwConfirmError');
+                err.textContent = data.error;
+                err.style.display = 'block';
+                return;
+            }
 
-    if (data.success) {
-        document.getElementById('row-' + user_id)?.remove();
-        showToast('Account deleted.');
-    } else {
-        showToast('Error: ' + (data.error || 'Could not delete.'));
-    }
+            closePwConfirm();
+            document.getElementById('row-' + user_id)?.remove();
+            showToast('Account deleted.');
+        }
+    );
 }
 
 // ── Export current table to CSV ─────────────────────────────────
 function exportExcel() {
-    const rows  = [['ID', 'Student No.', 'Full Name', 'Email', 'Role', 'Status', 'Created']];
+    const rows = [['ID', 'Student No.', 'Full Name', 'Email', 'Role', 'Status', 'Created']];
     document.querySelectorAll('#userTable tr[data-role]').forEach(row => {
         if (row.style.display === 'none') return;
         const cells = row.querySelectorAll('td');
@@ -700,14 +808,12 @@ function exportExcel() {
             cells[6].textContent.trim(),
         ]);
     });
-    const csv  = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const link = document.createElement('a');
-    link.href     = URL.createObjectURL(blob);
-    link.download = `CATMIS_Users_${new Date().toISOString().slice(0,10)}.csv`;
-    link.click();
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{wch:6},{wch:14},{wch:28},{wch:32},{wch:10},{wch:10},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws, 'Users');
+    previewAndExport(wb, `CATMIS_Users_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
-
 // ── Download import template (Excel with Instructions sheet) ─────
 function downloadTemplate() {
     if (typeof XLSX === 'undefined') {
@@ -761,7 +867,7 @@ function downloadTemplate() {
     ws2['!cols'] = [{wch:20}, {wch:14}, {wch:55}];
     XLSX.utils.book_append_sheet(wb, ws2, 'Instructions');
 
-    XLSX.writeFile(wb, 'CATMIS_Student_Import_Template.xlsx');
+    previewAndExport(wb, 'CATMIS_Student_Import_Template.xlsx');
 }
 
 // ── Handle imported file (Excel or CSV) ────────────────────────

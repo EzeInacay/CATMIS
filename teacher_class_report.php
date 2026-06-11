@@ -453,8 +453,9 @@ function exportExcel() {
     const ws = XLSX.utils.aoa_to_sheet(data);
     ws['!cols'] = [{wch:4},{wch:28},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14}];
     XLSX.utils.book_append_sheet(wb, ws, 'Class Report');
-    XLSX.writeFile(wb, 'ClassReport_<?= addslashes($currentSection['section_name'] ?? 'Section') ?>_<?= date('Ymd') ?>.xlsx');
+    previewAndExport(wb, 'ClassReport_<?= addslashes($currentSection['section_name'] ?? 'Section') ?>_<?= date('Ymd') ?>.xlsx');
 }
 </script>
+<script src="js/export_preview_modal.js"></script>
 </body>
 </html>

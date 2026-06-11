@@ -8,6 +8,14 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     exit;
 }
 
+// Unread notifications count
+$_uid = $_SESSION['user_id'];
+$_nRes = $conn->prepare("SELECT COUNT(*) AS cnt FROM notifications WHERE admin_id=? AND is_read=0");
+$_nRes->bind_param('i', $_uid);
+$_nRes->execute();
+$unreadNotifs = $_nRes->get_result()->fetch_assoc()['cnt'] ?? 0;
+
+
 // ── School years for filter ──────────────────────────────────────
 $syList = $conn->query("SELECT sy_id, name, status FROM school_years ORDER BY sy_id DESC")->fetch_all(MYSQLI_ASSOC);
 $selectedSy = intval($_GET['sy_id'] ?? ($syList[0]['sy_id'] ?? 0));
@@ -132,6 +140,7 @@ $pendingRows = $pending->get_result()->fetch_all(MYSQLI_ASSOC);
 <title>Financial Report | CATMIS</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="js/export_preview_modal.js"></script>
 <link href="css/admind.css" rel="stylesheet">
 <style>
 .report-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
@@ -178,6 +187,12 @@ tr:last-child td { border-bottom:none; }
         <a href="backup.php">💾 Backup</a>
     </div>
     <div class="navbar-right">
+        <a href="notifications.php" style="text-decoration:none;position:relative;display:flex;align-items:center;">
+            <span style="font-size:20px;">🔔</span>
+            <?php if ($unreadNotifs > 0): ?>
+            <span style="position:absolute;top:-6px;right:-6px;background:#ff3b30;color:white;border-radius:50%;width:18px;height:18px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;"><?= min($unreadNotifs,99) ?></span>
+            <?php endif; ?>
+        </a>
         <button class="logout-btn" onclick="window.location.href='php/logout.php'">Logout</button>
     </div>
 </nav>
@@ -343,7 +358,7 @@ function exportSheet(data, sheetName, fileName) {
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(data);
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    XLSX.writeFile(wb, fileName + '_' + new Date().toISOString().slice(0,10) + '.xlsx');
+    previewAndExport(wb, fileName + '_' + new Date().toISOString().slice(0,10) + '.xlsx');
 }
 
 function exportGrade()   { exportSheet(tableToArray('gradeTable'),   'By Grade',   'CATMIS_GradeReport'); }
@@ -356,7 +371,7 @@ function exportFull() {
         ['Monthly',     tableToArray('monthlyTable')],
         ['Outstanding', tableToArray('pendingTable')],
     ].forEach(([name, data]) => XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), name));
-    XLSX.writeFile(wb, 'CATMIS_FinancialReport_' + new Date().toISOString().slice(0,10) + '.xlsx');
+    previewAndExport(wb, 'CATMIS_FinancialReport_' + new Date().toISOString().slice(0,10) + '.xlsx');
 }
 </script>
 </body>

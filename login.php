@@ -5,35 +5,44 @@ include 'php/config.php';
 $mode  = isset($_GET['role']) && $_GET['role'] === 'admin' ? 'admin' : 'user';
 $error = '';
 
+// ── Redirect to T&C if not yet accepted this session ─────────────
+if (empty($_SESSION['terms_accepted'])) {
+    $redirect = 'login.php' . ($_SERVER['QUERY_STRING'] ? '?' . $_SERVER['QUERY_STRING'] : '');
+    header('Location: terms.php?redirect=' . urlencode($redirect));
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $identifier = trim($_POST['identifier'] ?? '');
     $password   = trim($_POST['password']   ?? '');
     $loginMode  = $_POST['mode'] ?? 'user';
 
     if ($loginMode === 'admin') {
-        // Admin logs in with their admin ID (student_number field or email)
+        // Admins and superadmins
         $stmt = $conn->prepare("
             SELECT user_id, full_name, password, role
             FROM users
-            WHERE (email = ? OR student_number = ?) AND role = 'admin' AND status = 'active'
+            WHERE (email = ? OR student_number = ?)
+              AND role IN ('admin','superadmin')
+              AND status = 'active'
         ");
         $stmt->bind_param('ss', $identifier, $identifier);
     } else {
-        // Teacher logs in with email; student logs in with student_number or email
+        // Teachers and students
         $stmt = $conn->prepare("
             SELECT user_id, full_name, password, role
             FROM users
-            WHERE (email = ? OR student_number = ?) AND role IN ('teacher','student') AND status = 'active'
+            WHERE (email = ? OR student_number = ?)
+              AND role IN ('teacher','student')
+              AND status = 'active'
         ");
         $stmt->bind_param('ss', $identifier, $identifier);
     }
 
     $stmt->execute();
-    $result = $stmt->get_result();
-    $user   = $result->fetch_assoc();
+    $user = $stmt->get_result()->fetch_assoc();
 
     if ($user) {
-        // Support both bcrypt hashed passwords and plain-text (for dev/testing)
         $valid = password_verify($password, $user['password']) || $password === $user['password'];
 
         if ($valid) {
@@ -41,13 +50,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['full_name'] = $user['full_name'];
             $_SESSION['role']      = $user['role'];
 
-            // Log the login action
+            // Log login
             $log = $conn->prepare("INSERT INTO audit_logs (user_id, action) VALUES (?, 'Logged in')");
             $log->bind_param('i', $user['user_id']);
             $log->execute();
 
             // Redirect by role
-            if ($user['role'] === 'admin') {
+            if ($user['role'] === 'superadmin') {
+                header('Location: superadmin_dashboard.php');
+            } elseif ($user['role'] === 'admin') {
                 header('Location: admin_dashboard.php');
             } elseif ($user['role'] === 'teacher') {
                 header('Location: teacher_dashboard.php');
@@ -68,7 +79,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <title>Login | CATMIS</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
-<link href="css/login.css" rel="stylesheet" />
+<link href="css/login.css" rel="stylesheet">
 </head>
 <body>
 
@@ -100,28 +111,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <input type="hidden" name="mode" value="<?= htmlspecialchars($mode) ?>">
 
         <div class="field">
-            <label>
-                <?= $mode === 'admin' ? 'Admin Email or ID' : 'Email or Student ID' ?>
-            </label>
-            <input
-                type="text"
-                name="identifier"
+            <label><?= $mode === 'admin' ? 'Admin Email or ID' : 'Email or Student ID' ?></label>
+            <input type="text" name="identifier"
                 placeholder="<?= $mode === 'admin' ? 'admin@school.com' : 'email or 2025-00001' ?>"
-                required
-                autocomplete="username"
-                value="<?= htmlspecialchars($_POST['identifier'] ?? '') ?>"
-            >
+                required autocomplete="username"
+                value="<?= htmlspecialchars($_POST['identifier'] ?? '') ?>">
         </div>
 
         <div class="field">
             <label>Password</label>
-            <input
-                type="password"
-                name="password"
-                placeholder="••••••••"
-                required
-                autocomplete="current-password"
-            >
+            <input type="password" name="password" placeholder="••••••••" required autocomplete="current-password">
         </div>
 
         <button type="submit" class="login-btn <?= $mode === 'admin' ? 'admin-btn' : 'user-btn' ?>">
@@ -133,13 +132,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="error-msg">⚠ <?= htmlspecialchars($error) ?></div>
     <?php endif; ?>
 
-    <!-- Switch mode link -->
     <div class="switch-link">
         <?php if ($mode === 'admin'): ?>
             Not an admin? <a href="login.php">Teacher / Student Login →</a>
         <?php else: ?>
             Are you an admin? <a href="login.php?role=admin">Admin Login →</a>
         <?php endif; ?>
+    </div>
+
+    <div style="text-align:center;margin-top:14px;">
+        <a href="terms.php?redirect=<?= urlencode('login.php?role='.$mode) ?>" style="font-size:11px;color:#94a3b8;text-decoration:none;">
+            📄 View Terms &amp; Conditions
+        </a>
     </div>
 
 </div>

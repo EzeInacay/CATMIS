@@ -64,6 +64,41 @@ body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f
 }
 .logout-btn:hover { background: #d0302a; }
 
+/* Mobile hamburger — hidden on desktop */
+.nav-hamburger {
+    display: none;
+    background: none;
+    border: none;
+    color: white;
+    font-size: 22px;
+    cursor: pointer;
+    padding: 4px 8px;
+    margin-left: auto;
+    line-height: 1;
+}
+/* Mobile nav drawer */
+.mobile-nav-drawer {
+    display: none;
+    position: fixed;
+    top: 60px; left: 0; right: 0;
+    background: #0f2027;
+    z-index: 99;
+    padding: 12px 0 16px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    flex-direction: column;
+}
+.mobile-nav-drawer.open { display: flex; }
+.mobile-nav-drawer a {
+    color: rgba(255,255,255,0.8);
+    text-decoration: none;
+    padding: 12px 24px;
+    font-size: 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    transition: background 0.18s;
+}
+.mobile-nav-drawer a:last-child { border-bottom: none; }
+.mobile-nav-drawer a:hover, .mobile-nav-drawer a.active { background: rgba(255,255,255,0.1); color: white; }
+
 /* ===== MAIN ===== */
 .main { margin-top: 60px; padding: 30px; }
 .title { font-size: 26px; font-weight: bold; }
@@ -74,11 +109,11 @@ body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f
 .card h4 { margin: 0 0 8px; color: #6c757d; font-size: 14px; }
 .card p  { font-size: 28px; margin: 0; font-weight: bold; color: #0f2027; }
 
-.section-title-row { display: flex; align-items: center; justify-content: space-between; margin-top: 40px; margin-bottom: 10px; }
+.section-title-row { display: flex; align-items: center; justify-content: space-between; margin-top: 40px; margin-bottom: 10px; flex-wrap: wrap; gap: 10px; }
 .section-title-row h3 { margin: 0; }
 
-.search-export-row { display: flex; align-items: center; gap: 12px; margin-top: 20px; }
-.search-export-row input { flex: 1; max-width: 500px; padding: 10px 14px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; }
+.search-export-row { display: flex; align-items: center; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
+.search-export-row input { flex: 1; min-width: 200px; max-width: 500px; padding: 10px 14px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; }
 .btn-export { padding: 10px 18px; background: #198754; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
 .btn-export:hover { background: #157347; }
 
@@ -101,8 +136,8 @@ body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f
 .section-buttons button { padding: 7px 12px; border: none; background: #6c757d; color: white; border-radius: 6px; cursor: pointer; font-size: 13px; transition: background 0.2s; }
 .section-buttons button:hover, .section-buttons button.active-sec { background: #495057; }
 
-.table-container { background: white; padding: 10px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); max-height: 420px; overflow-y: auto; margin-top: 12px; }
-table { width: 100%; border-collapse: collapse; }
+.table-container { background: white; padding: 10px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); max-height: 420px; overflow-y: auto; overflow-x: auto; margin-top: 12px; }
+table { width: 100%; border-collapse: collapse; min-width: 520px; }
 th, td { padding: 13px 15px; text-align: left; font-size: 14px; }
 th { background: #f2f4f7; position: sticky; top: 0; z-index: 1; }
 tr:nth-child(even) { background: #fafafa; }
@@ -119,11 +154,23 @@ tr:hover { background: #f0f4ff; }
 .popup a { color: #0077b6; cursor: pointer; font-size: 13px; }
 #popupBox.hidden { opacity: 0; pointer-events: none; }
 
+/* ===== RESPONSIVE ===== */
 @media (max-width: 900px) {
-    .navbar-links a { font-size: 12px; padding: 8px 9px; }
-    .notif-badge { display: none; }
+    .navbar-links { display: none; }
+    .notif-badge  { display: none; }
+    .nav-hamburger { display: block; }
+    .navbar-right .logout-btn { display: none; }
 }
+
 @media (max-width: 640px) {
     .cards { flex-direction: column; }
-    .main { padding: 20px 14px; }
+    .main { padding: 16px 12px; }
+    .title { font-size: 20px; }
+    .section-title-row { flex-direction: column; align-items: flex-start; }
+    .search-export-row { flex-direction: column; align-items: stretch; }
+    .search-export-row input { max-width: 100%; }
+    .grade-select { min-width: 100%; }
+    th, td { padding: 10px 10px; font-size: 13px; }
+    .popup { right: 8px; left: 8px; width: auto; }
+    .card p { font-size: 22px; }
 }

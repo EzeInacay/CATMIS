@@ -306,7 +306,7 @@ tr:hover td { background: #f8faff; }
     </a>
     <div class="navbar-right">
         <span class="nav-name">👋 <?= htmlspecialchars($user['full_name']) ?></span>
-        <button class="logout-btn" onclick="window.location.href='php/logout.php'">Logout</button>
+        <button class="logout-btn" onclick="window.location.href='php/logout.php'">Logo1ut</button>
     </div>
 </nav>
 

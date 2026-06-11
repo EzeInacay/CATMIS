@@ -321,11 +321,6 @@ $days = ['1' => 'Monday','2' => 'Tuesday','3' => 'Wednesday','4' => 'Thursday','
         <a href="backup.php" class="active">💾 Backup</a>
     </div>
     <div class="navbar-right">
-        <?php if ($pendingEdits > 0): ?>
-        <a href="edit_requests_admin.php" style="text-decoration:none;">
-            <span style="font-size:13px;color:rgba(255,255,255,0.7);background:rgba(255,255,255,0.1);padding:5px 11px;border-radius:6px;">✏️ <?= $pendingEdits ?> Request<?= $pendingEdits!==1?'s':'' ?></span>
-        </a>
-        <?php endif; ?>
         <a href="notifications.php" style="text-decoration:none;position:relative;display:flex;align-items:center;">
             <span style="font-size:20px;">🔔</span>
             <?php if ($unreadNotifs > 0): ?>

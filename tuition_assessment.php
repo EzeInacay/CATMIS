@@ -7,6 +7,14 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
     exit;
 }
 
+// Unread notifications count
+$_uid = $_SESSION['user_id'];
+$_nRes = $conn->prepare("SELECT COUNT(*) AS cnt FROM notifications WHERE admin_id=? AND is_read=0");
+$_nRes->bind_param('i', $_uid);
+$_nRes->execute();
+$unreadNotifs = $_nRes->get_result()->fetch_assoc()['cnt'] ?? 0;
+
+
 // ── Handle AJAX actions ──────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     header('Content-Type: application/json');
@@ -115,6 +123,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'set_active_sy') {
         $sy_id = intval($_POST['sy_id'] ?? 0);
         if (!$sy_id) { echo json_encode(['error' => 'Invalid school year.']); exit; }
+
+        $raw     = $_POST['confirm_password'] ?? '';
+        $adminRow = $conn->prepare("SELECT password FROM users WHERE user_id=?");
+        $adminRow->bind_param('i', $_SESSION['user_id']); $adminRow->execute();
+        $adminPw  = $adminRow->get_result()->fetch_assoc()['password'];
+        if (!password_verify($raw, $adminPw)) {
+            echo json_encode(['error' => 'Incorrect password.']); exit;
+        }
 
         // Archive all, then activate the selected one
         $conn->query("UPDATE school_years SET status='archived'");
@@ -321,9 +337,16 @@ body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f
         <a href="user_management.php">👥 Users</a>
         <a href="payment_history.php">📄 Payments</a>
         <a href="audit_logs.php">🕒 Audit Logs</a>
-        <a href="#">💾 Backup</a>
+        <a href="financial_report.php">📊 Reports</a>
+        <a href="backup.php">💾 Backup</a>
     </div>
     <div class="navbar-right">
+        <a href="notifications.php" style="text-decoration:none;position:relative;display:flex;align-items:center;">
+            <span style="font-size:20px;">🔔</span>
+            <?php if ($unreadNotifs > 0): ?>
+            <span style="position:absolute;top:-6px;right:-6px;background:#ff3b30;color:white;border-radius:50%;width:18px;height:18px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;"><?= min($unreadNotifs,99) ?></span>
+            <?php endif; ?>
+        </a>
         <button class="logout-btn" onclick="window.location.href='php/logout.php'">Logout</button>
     </div>
 </nav>
@@ -457,6 +480,24 @@ body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f
         <div class="modal-actions">
             <button class="btn-close" onclick="closeModal()">Cancel</button>
             <button class="btn-save" onclick="saveFee()">Save Fee</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== PASSWORD CONFIRM MODAL ===== -->
+<div class="modal-overlay" id="pwConfirmOverlay">
+    <div class="modal" style="max-width:380px;">
+        <h3>Confirm Action</h3>
+        <p style="font-size:14px;color:#475569;margin:-10px 0 18px;">Enter your admin password to set this school year as active. All other school years will be archived.</p>
+        <div style="margin-bottom:16px;">
+            <label style="display:block;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;margin-bottom:5px;">Your Admin Password</label>
+            <input type="password" id="pwConfirmInput" placeholder="••••••••" autocomplete="current-password"
+                   style="width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:14px;outline:none;font-family:inherit;box-sizing:border-box;">
+            <span id="pwConfirmError" style="color:#dc2626;font-size:12px;margin-top:5px;display:none;"></span>
+        </div>
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="closePwConfirm()">Cancel</button>
+            <button class="btn-save" id="pwConfirmBtn" style="background:#dc2626;">Confirm</button>
         </div>
     </div>
 </div>
@@ -635,20 +676,46 @@ document.getElementById('addSYOverlay').addEventListener('click', function(e) {
     if (e.target === this) closeAddSY();
 });
 
-// ── Set Active School Year (archive current, activate selected) ──
-async function setActiveSY(sy_id) {
-    if (!confirm('Set this school year as Active? All other school years will be archived.')) return;
+// ── Password Confirm Modal ───────────────────────────────────────
+let _pwPendingSyId = null;
+
+function closePwConfirm() {
+    document.getElementById('pwConfirmOverlay').classList.remove('open');
+    _pwPendingSyId = null;
+}
+
+document.getElementById('pwConfirmBtn').addEventListener('click', async function () {
+    const pw  = document.getElementById('pwConfirmInput').value;
+    const err = document.getElementById('pwConfirmError');
+    if (!pw) { err.textContent = 'Please enter your password.'; err.style.display = 'block'; return; }
+
     const body = new FormData();
-    body.append('action', 'set_active_sy');
-    body.append('sy_id',  sy_id);
+    body.append('action',           'set_active_sy');
+    body.append('sy_id',            _pwPendingSyId);
+    body.append('confirm_password', pw);
     const res  = await fetch('tuition_assessment.php', { method: 'POST', body });
     const data = await res.json();
-    if (data.success) {
-        showToast('School year set as active. Reloading…');
-        setTimeout(() => location.reload(), 800);
-    } else {
-        showToast('Error: ' + (data.error || 'Unknown'));
-    }
+    if (data.error) { err.textContent = data.error; err.style.display = 'block'; return; }
+    closePwConfirm();
+    showToast('School year set as active. Reloading…');
+    setTimeout(() => location.reload(), 800);
+});
+
+document.getElementById('pwConfirmInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') document.getElementById('pwConfirmBtn').click();
+});
+
+document.getElementById('pwConfirmOverlay').addEventListener('click', function(e) {
+    if (e.target === this) closePwConfirm();
+});
+
+// ── Set Active School Year (archive current, activate selected) ──
+async function setActiveSY(sy_id) {
+    _pwPendingSyId = sy_id;
+    document.getElementById('pwConfirmInput').value = '';
+    document.getElementById('pwConfirmError').style.display = 'none';
+    document.getElementById('pwConfirmOverlay').classList.add('open');
+    setTimeout(() => document.getElementById('pwConfirmInput').focus(), 80);
 }
 
 </script>

@@ -49,6 +49,8 @@ $activeDebtors    = $pendingCount;
 <title>CATMIS</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="js/admin.js"></script>
+<script src="js/export_preview_modal.js"></script>
 <link href="css/admind.css" rel="stylesheet" />
 </head>
 <body>
@@ -69,14 +71,6 @@ $activeDebtors    = $pendingCount;
         <a href="backup.php">💾 Backup</a>
     </div>
     <div class="navbar-right">
-        <?php if ($pendingCount > 0): ?>
-        <div class="notif-badge">⚠ <?= $pendingCount ?> Pending</div>
-        <?php endif; ?>
-        <?php if ($pendingEdits > 0): ?>
-        <a href="edit_requests_admin.php" style="text-decoration:none;position:relative;">
-            <span style="font-size:13px;color:rgba(255,255,255,0.7);background:rgba(255,255,255,0.1);padding:5px 11px;border-radius:6px;">✏️ <?= $pendingEdits ?> Request<?= $pendingEdits!==1?'s':'' ?></span>
-        </a>
-        <?php endif; ?>
         <a href="notifications.php" style="text-decoration:none;position:relative;display:flex;align-items:center;">
             <span style="font-size:20px;">🔔</span>
             <?php if ($unreadNotifs > 0): ?>

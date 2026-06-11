@@ -68,9 +68,7 @@ body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f
 .balance-hero .amount { font-size: 40px; font-weight: 700; letter-spacing: -1px; }
 .balance-hero .amount.paid { color: #6ee7b7; }
 .balance-hero .amount.due  { color: #fca5a5; }
-.status-pill {
-    padding: 8px 20px; border-radius: 20px; font-size: 14px; font-weight: 600;
-}
+.status-pill { padding: 8px 20px; border-radius: 20px; font-size: 14px; font-weight: 600; }
 .status-pill.paid    { background: rgba(110,231,183,0.15); color: #6ee7b7; border: 1px solid rgba(110,231,183,0.3); }
 .status-pill.pending { background: rgba(252,165,165,0.15); color: #fca5a5; border: 1px solid rgba(252,165,165,0.3); }
 
@@ -78,8 +76,8 @@ body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f
 .section-header { font-size: 16px; font-weight: 700; color: #0f2027; margin: 28px 0 12px; }
 
 /* ===== TABLE ===== */
-.table-wrap { background: white; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); overflow: hidden; margin-bottom: 28px; }
-table { width: 100%; border-collapse: collapse; }
+.table-wrap { background: white; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); overflow: hidden; margin-bottom: 28px; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; min-width: 420px; }
 th {
     background: #f8fafc; text-align: left; font-size: 12px; font-weight: 600;
     color: #64748b; padding: 11px 16px; border-bottom: 1px solid #e2e8f0;
@@ -103,13 +101,44 @@ tr:hover td { background: #f8faff; }
 .method-Bank-Transfer { background: #f3e8ff; color: #6b21a8; }
 
 .empty-msg { text-align: center; color: #94a3b8; padding: 32px; font-size: 14px; }
-
 .total-row td { font-weight: 700; background: #f8fafc; border-top: 2px solid #e2e8f0; }
 
 /* ===== TEACHER VIEW ===== */
-.teacher-card {
-    background: white; border-radius: 14px; padding: 40px;
-    box-shadow: 0 4px 10px rgba(0,0,0,0.06); text-align: center;
-}
+.teacher-card { background: white; border-radius: 14px; padding: 40px; box-shadow: 0 4px 10px rgba(0,0,0,0.06); text-align: center; }
 .teacher-card h3 { color: #0f2027; margin-bottom: 8px; }
 .teacher-card p  { color: #64748b; font-size: 14px; }
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 768px) {
+    .main { padding: 16px 12px; }
+
+    /* Profile card stacks vertically */
+    .profile-card { flex-direction: column; align-items: flex-start; padding: 20px; gap: 16px; }
+    .profile-meta { margin-left: 0; gap: 14px; }
+    .meta-item { text-align: left; }
+
+    /* Balance hero stacks */
+    .balance-hero { flex-direction: column; padding: 22px 20px; gap: 12px; }
+    .balance-hero .amount { font-size: 32px; }
+
+    /* Summary cards 2-col grid */
+    .summary-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .sum-card { min-width: unset; }
+    .sum-card p { font-size: 18px; }
+
+    /* Nav: hide name, keep logout */
+    .nav-name { display: none; }
+
+    /* Table scrolls horizontally */
+    .table-wrap { overflow-x: auto; }
+    table { min-width: 460px; }
+    th, td { padding: 9px 12px; font-size: 13px; }
+}
+
+@media (max-width: 480px) {
+    .summary-cards { grid-template-columns: 1fr; }
+    .balance-hero .amount { font-size: 28px; }
+    .profile-info h2 { font-size: 17px; }
+    .section-header { font-size: 15px; margin: 20px 0 10px; }
+    .teacher-card { padding: 28px 16px; }
+}

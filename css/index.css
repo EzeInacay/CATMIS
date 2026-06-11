@@ -27,8 +27,6 @@ body {
         linear-gradient(160deg, #0f2027 0%, #203a43 50%, #0f2027 100%);
     z-index: 0;
 }
-
-/* subtle grid lines */
 .bg-mesh::after {
     content: '';
     position: absolute;
@@ -58,7 +56,6 @@ body {
     margin-bottom: 56px;
     animation: fadeUp 0.7s ease both;
 }
-
 .brand-tag {
     display: inline-block;
     font-size: 11px;
@@ -69,15 +66,13 @@ body {
     margin-bottom: 14px;
     opacity: 0.9;
 }
-
 .brand h1 {
     font-family: 'Playfair Display', serif;
-    font-size: clamp(52px, 8vw, 88px);
+    font-size: clamp(44px, 8vw, 88px);
     color: var(--white);
     line-height: 1;
     letter-spacing: -2px;
 }
-
 .brand p {
     margin-top: 14px;
     font-size: 14px;
@@ -107,7 +102,6 @@ body {
     justify-content: center;
     animation: fadeUp 0.7s 0.2s ease both;
 }
-
 .login-card {
     width: 220px;
     background: rgba(255,255,255,0.04);
@@ -123,7 +117,6 @@ body {
     position: relative;
     overflow: hidden;
 }
-
 .login-card::before {
     content: '';
     position: absolute;
@@ -132,43 +125,13 @@ body {
     opacity: 0;
     transition: opacity 0.25s;
 }
-
-.login-card:hover {
-    background: rgba(255,255,255,0.08);
-    border-color: rgba(0,180,216,0.4);
-    transform: translateY(-4px);
-}
-
+.login-card:hover { background: rgba(255,255,255,0.08); border-color: rgba(0,180,216,0.4); transform: translateY(-4px); }
 .login-card:hover::before { opacity: 1; }
 
-.card-icon {
-    font-size: 36px;
-    margin-bottom: 16px;
-    display: block;
-}
-
-.card-title {
-    font-family: 'Playfair Display', serif;
-    font-size: 20px;
-    margin-bottom: 8px;
-}
-
-.card-desc {
-    font-size: 12px;
-    font-weight: 300;
-    color: rgba(255,255,255,0.45);
-    line-height: 1.5;
-}
-
-.card-arrow {
-    display: inline-block;
-    margin-top: 20px;
-    font-size: 11px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--accent);
-    opacity: 0.8;
-}
+.card-icon  { font-size: 36px; margin-bottom: 16px; display: block; }
+.card-title { font-family: 'Playfair Display', serif; font-size: 20px; margin-bottom: 8px; }
+.card-desc  { font-size: 12px; font-weight: 300; color: rgba(255,255,255,0.45); line-height: 1.5; }
+.card-arrow { display: inline-block; margin-top: 20px; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--accent); opacity: 0.8; }
 
 /* ── FOOTER ── */
 .footer {
@@ -182,8 +145,21 @@ body {
     z-index: 1;
 }
 
-/* ── ANIMATIONS ── */
 @keyframes fadeUp {
     from { opacity: 0; transform: translateY(20px); }
     to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 540px) {
+    body { overflow-y: auto; }
+    .wrapper { padding: 60px 20px 80px; justify-content: flex-start; min-height: 100vh; }
+    .brand { margin-bottom: 36px; }
+    .brand h1 { font-size: 52px; letter-spacing: -1px; }
+    .brand p { font-size: 13px; }
+    .divider { margin-bottom: 32px; }
+    .cards { flex-direction: column; align-items: center; gap: 14px; width: 100%; }
+    .login-card { width: 100%; max-width: 320px; padding: 28px 20px 24px; }
+    .card-title { font-size: 18px; }
+    .footer { position: relative; bottom: auto; margin-top: 32px; padding-bottom: 20px; }
 }

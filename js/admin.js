@@ -71,7 +71,7 @@ function exportToExcel() {
     const ws = XLSX.utils.aoa_to_sheet(data);
     ws['!cols'] = [{ wch: 12 }, { wch: 28 }, { wch: 10 }, { wch: 16 }, { wch: 20 }, { wch: 12 }];
     XLSX.utils.book_append_sheet(wb, ws, 'Student Ledger');
-    XLSX.writeFile(wb, `CATMIS_StudentLedger_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    previewAndExport(wb, `CATMIS_StudentLedger_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 function dismissPopup() {
     const box = document.getElementById('popupBox');

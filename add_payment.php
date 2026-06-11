@@ -103,7 +103,10 @@ try {
         );
     }
 
-    header("Location: payment_form.php?account_id={$account_id}&success=1");
+    $redirect_or     = urlencode($or_number);
+    $redirect_amount = urlencode(number_format($amount, 2));
+    $redirect_method = urlencode($method);
+    header("Location: payment_form.php?account_id={$account_id}&success=1&or={$redirect_or}&amt={$redirect_amount}&mth={$redirect_method}");
 
 } catch (Exception $e) {
     $conn->rollback();

@@ -354,8 +354,9 @@ function exportExcel() {
     const ws = XLSX.utils.aoa_to_sheet(data);
     ws['!cols'] = [{wch:14},{wch:28},{wch:8},{wch:16},{wch:14},{wch:10}];
     XLSX.utils.book_append_sheet(wb, ws, 'My Students');
-    XLSX.writeFile(wb, `CATMIS_MyStudents_${new Date().toISOString().slice(0,10)}.xlsx`);
+    previewAndExport(wb, `CATMIS_MyStudents_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 </script>
+<script src="js/export_preview_modal.js"></script>
 </body>
 </html>
