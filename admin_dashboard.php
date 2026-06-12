@@ -103,7 +103,6 @@ $recentActivity = $activityRes->fetch_all(MYSQLI_ASSOC);
 <title>CATMIS</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="js/admin.js"></script>
 <script src="js/export_preview_modal.js"></script>
 <link href="css/admind.css" rel="stylesheet" />
 </head>
@@ -242,8 +241,6 @@ $recentActivity = $activityRes->fetch_all(MYSQLI_ASSOC);
         <div class="section-buttons" id="sectionButtons"></div>
     </div>
 
-    
-
     <div class="table-container">
         <table id="studentTable">
             <thead>
@@ -273,11 +270,21 @@ while ($row = $result->fetch_assoc()) {
     $action  = ($status === 'Pending')
         ? "<button class='btn-payment' onclick='pay({$row['account_id']})'>Post Payment</button>"
         : "—";
-    echo "<tr data-grade='{$row['grade_level']}' data-section='{$row['section']}'>
+
+    // Normalize grade_level to a plain numeric string so it matches the <option value="N"> in the filter dropdown
+    $gradeRaw = trim((string)$row['grade_level']);
+    $gradeNum = preg_replace('/[^0-9]/', '', $gradeRaw); // strips "Grade " prefix if present
+    $gradeAttr = ($gradeNum !== '') ? $gradeNum : '';
+    $gradeDisplay = ($gradeRaw !== '') ? htmlspecialchars($gradeRaw) : 'N/A';
+
+    $sectionAttr = htmlspecialchars($row['section'] ?? '', ENT_QUOTES);
+    $sectionDisplay = ($row['section'] !== '' && $row['section'] !== null) ? htmlspecialchars($row['section']) : 'N/A';
+
+    echo "<tr data-grade='{$gradeAttr}' data-section='{$sectionAttr}'>
         <td>{$row['student_id']}</td>
         <td>{$row['full_name']}</td>
-        <td>{$row['grade_level']}</td>
-        <td>{$row['section']}</td>
+        <td>{$gradeDisplay}</td>
+        <td>{$sectionDisplay}</td>
         <td>₱" . number_format($balance, 2) . "</td>
         <td><span class='{$badge}'>{$status}</span></td>
         <td>{$action}</td>

@@ -9,29 +9,42 @@ function sortAlphabetically() {
     visible.sort((a, b) => a.cells[1].textContent.localeCompare(b.cells[1].textContent));
     visible.forEach(r => tbody.appendChild(r));
 }
+
 function searchTable() {
     const q = document.getElementById('searchInput').value.toLowerCase();
+    let visibleCount = 0;
     allRows.forEach(row => {
         const name    = row.cells[1].textContent.toLowerCase();
         const section = row.cells[3].textContent.toLowerCase();
-        const gradeOk = currentGrade === 'all' || row.dataset.grade === currentGrade;
+        const gradeOk = currentGrade === 'all' || (row.dataset.grade || '').trim() === currentGrade;
         const secOk   = currentSection === 'all' || row.dataset.section === currentSection;
-        row.style.display = (name.includes(q) || section.includes(q)) && gradeOk && secOk ? '' : 'none';
+        const show = (name.includes(q) || section.includes(q)) && gradeOk && secOk;
+        row.style.display = show ? '' : 'none';
+        if (show) visibleCount++;
     });
+    toggleNoRecord(visibleCount);
 }
+
 function filterGrade(grade) {
     currentGrade   = grade;
     currentSection = 'all';
     document.getElementById('sectionButtons').innerHTML = '';
     const sections = new Set();
+    let visibleCount = 0;
     allRows.forEach(row => {
-        const match = grade === 'all' || row.dataset.grade === grade;
+        const rowGrade = (row.dataset.grade || '').trim();
+        const match = grade === 'all' || rowGrade === grade;
         row.style.display = match ? '' : 'none';
-        if (match) sections.add(row.dataset.section);
+        if (match) {
+            sections.add(row.dataset.section);
+            visibleCount++;
+        }
     });
     generateSectionButtons(sections);
     sortAlphabetically();
+    toggleNoRecord(visibleCount);
 }
+
 function generateSectionButtons(sections) {
     const container = document.getElementById('sectionButtons');
     container.innerHTML = '';
@@ -48,17 +61,44 @@ function generateSectionButtons(sections) {
         container.appendChild(btn);
     });
 }
+
 function filterSection(section, btn) {
     currentSection = section;
     document.querySelectorAll('#sectionButtons button').forEach(b => b.classList.remove('active-sec'));
     if (btn) btn.classList.add('active-sec');
+    let visibleCount = 0;
     allRows.forEach(row => {
-        const gradeOk = currentGrade === 'all' || row.dataset.grade === currentGrade;
+        const rowGrade = (row.dataset.grade || '').trim();
+        const gradeOk = currentGrade === 'all' || rowGrade === currentGrade;
         const secOk   = section === 'all' || row.dataset.section === section;
-        row.style.display = gradeOk && secOk ? '' : 'none';
+        const show = gradeOk && secOk;
+        row.style.display = show ? '' : 'none';
+        if (show) visibleCount++;
     });
     sortAlphabetically();
+    toggleNoRecord(visibleCount);
 }
+
+function toggleNoRecord(visibleCount) {
+    let msg = document.getElementById('noRecordMsg');
+    if (!msg) {
+        msg = document.createElement('p');
+        msg.id = 'noRecordMsg';
+        msg.style.textAlign = 'center';
+        msg.style.color = '#94a3b8';
+        msg.style.padding = '20px';
+        table.parentNode.appendChild(msg);
+    }
+    if (visibleCount === 0) {
+        msg.textContent = 'No record found.';
+        msg.style.display = 'block';
+        table.style.display = 'none';
+    } else {
+        msg.style.display = 'none';
+        table.style.display = '';
+    }
+}
+
 function exportToExcel() {
     const headers = ['Student ID', 'Student Name', 'Grade', 'Section', 'Remaining Balance', 'Status'];
     const data    = [headers];
@@ -73,10 +113,13 @@ function exportToExcel() {
     XLSX.utils.book_append_sheet(wb, ws, 'Student Ledger');
     previewAndExport(wb, `CATMIS_StudentLedger_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
+
 function dismissPopup() {
     const box = document.getElementById('popupBox');
     if (box) box.classList.add('hidden');
 }
+
 function pay(account_id) { window.location.href = 'payment_form.php?account_id=' + account_id; }
 function logout() { window.location.href = 'logout.php'; }
+
 window.onload = () => sortAlphabetically();
