@@ -6,7 +6,8 @@
  * student_ledgers, linked by fee_id for a full audit trail.
  *
  * Expected POST fields:
- *   student_number (students only), full_name, email, password,
+ *   student_number (students only, max 12 chars), first_name, last_name,
+ *   middle_name (optional), email, password,
  *   role, grade_level, section, section_id,
  *   strand (Grade 11-12 only: STEM | ABM | HUMSS)
  */
@@ -20,7 +21,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 // ── Collect & sanitise inputs ────────────────────────────────────
 $student_number = trim($_POST['student_number'] ?? '') ?: null;
-$full_name      = trim($_POST['full_name']      ?? '');
+$first_name     = trim($_POST['first_name']     ?? '');
+$middle_name    = trim($_POST['middle_name']    ?? ''); // optional
+$last_name      = trim($_POST['last_name']      ?? '');
 $email          = trim($_POST['email']          ?? '');
 $raw_password   = $_POST['password']            ?? '';
 $role           = $_POST['role']                ?? '';
@@ -28,12 +31,22 @@ $grade_level    = trim($_POST['grade_level']    ?? '');
 $section        = trim($_POST['section']        ?? '');
 $section_id     = intval($_POST['section_id']   ?? 0);
 $strand         = trim($_POST['strand']         ?? '');
+$contact_number = trim($_POST['contact_number'] ?? '') ?: null;
+$address        = trim($_POST['address']        ?? '') ?: null;
 
 // ── Basic validation ─────────────────────────────────────────────
-if (!$full_name || !$email || !$raw_password || !in_array($role, ['student', 'teacher'])) {
+if (!$first_name || !$last_name || !$email || !$raw_password || !in_array($role, ['student', 'teacher'])) {
     echo 'Error: Missing or invalid required fields.';
     exit;
 }
+
+if ($student_number !== null && strlen($student_number) > 12) {
+    echo 'Error: Student number must be at most 12 characters.';
+    exit;
+}
+
+// Compose full_name as "Last, First Middle" (middle optional) for storage/display
+$full_name = $last_name . ', ' . $first_name . ($middle_name ? ' ' . $middle_name : '');
 
 $password = password_hash($raw_password, PASSWORD_DEFAULT);
 
@@ -58,10 +71,10 @@ try {
 
         // 2a. Insert student row
         $stmt = $conn->prepare("
-            INSERT INTO students (user_id, section_id, grade_level, section)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO students (user_id, section_id, grade_level, section, contact_number, address)
+            VALUES (?, ?, ?, ?, ?, ?)
         ");
-        $stmt->bind_param('iiss', $user_id, $section_id, $grade_level, $section);
+        $stmt->bind_param('iissss', $user_id, $section_id, $grade_level, $section, $contact_number, $address);
         $stmt->execute();
         $student_id = $conn->insert_id;
 

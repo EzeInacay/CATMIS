@@ -2,7 +2,7 @@
 session_start();
 include 'php/config.php';
 
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin','superadmin'])) {
     header('Location: login.php');
     exit;
 }
@@ -138,7 +138,9 @@ tr:hover td { background: #f8faff; }
         <a href="payment_history.php">📄 Payments</a>
         <a href="audit_logs.php">🕒 Audit Logs</a>
         <a href="financial_report.php">📊 Reports</a>
+        <?php if ($_SESSION['role'] === 'superadmin'): ?>
         <a href="backup.php">💾 Backup</a>
+        <?php endif; ?>
     </div>
     <div class="navbar-right">
         <a href="notifications.php" style="text-decoration:none;position:relative;display:flex;align-items:center;">

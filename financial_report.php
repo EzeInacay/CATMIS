@@ -3,7 +3,7 @@ session_start();
 include 'php/config.php';
 include 'php/get_balance.php';
 
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin','superadmin'])) {
     header('Location: login.php');
     exit;
 }
@@ -22,6 +22,20 @@ $selectedSy = intval($_GET['sy_id'] ?? ($syList[0]['sy_id'] ?? 0));
 $syName     = '';
 foreach ($syList as $sy) { if ($sy['sy_id'] === $selectedSy) $syName = $sy['name']; }
 
+// ── Month filter ─────────────────────────────────────────────────
+$selectedMonth = trim($_GET['month'] ?? ''); // format: YYYY-MM or ''
+$monthWhere    = $selectedMonth ? " AND DATE_FORMAT(p.payment_date, '%Y-%m') = ?" : '';
+$monthWhereGen = $selectedMonth ? " AND DATE_FORMAT(p.payment_date, '%Y-%m') = ?" : '';
+
+// helper: bind params with optional month
+function bindMonth($stmt, $sy, $month, $types = 'i') {
+    if ($month) {
+        $stmt->bind_param($types . 's', $sy, $month);
+    } else {
+        $stmt->bind_param($types, $sy);
+    }
+}
+
 // ── Collection summary ───────────────────────────────────────────
 $summary = $conn->prepare("
     SELECT
@@ -33,9 +47,9 @@ $summary = $conn->prepare("
         COUNT(p.payment_id)                                      AS tx_count
     FROM payments p
     JOIN tuition_accounts ta ON p.account_id = ta.account_id
-    WHERE ta.sy_id = ?
+    WHERE ta.sy_id = ?{$monthWhere}
 ");
-$summary->bind_param('i', $selectedSy);
+bindMonth($summary, $selectedSy, $selectedMonth);
 $summary->execute();
 $sum = $summary->get_result()->fetch_assoc();
 
@@ -184,7 +198,9 @@ tr:last-child td { border-bottom:none; }
         <a href="payment_history.php">📄 Payments</a>
         <a href="audit_logs.php">🕒 Audit Logs</a>
         <a href="financial_report.php" class="active">📊 Reports</a>
+        <?php if ($_SESSION['role'] === 'superadmin'): ?>
         <a href="backup.php">💾 Backup</a>
+        <?php endif; ?>
     </div>
     <div class="navbar-right">
         <a href="notifications.php" style="text-decoration:none;position:relative;display:flex;align-items:center;">
@@ -199,9 +215,9 @@ tr:last-child td { border-bottom:none; }
 
 <div class="main">
     <div class="report-header">
-        <h2>📊 Financial Report</h2>
-        <div style="display:flex;gap:10px;align-items:center;" class="no-print">
-            <form method="GET" style="display:inline;">
+        <h2>📊 Financial Report<?= $selectedMonth ? ' — ' . date('F Y', strtotime($selectedMonth . '-01')) : '' ?></h2>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;" class="no-print">
+            <form method="GET" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                 <select name="sy_id" class="sy-select" onchange="this.form.submit()">
                     <?php foreach ($syList as $sy): ?>
                     <option value="<?= $sy['sy_id'] ?>" <?= $sy['sy_id'] == $selectedSy ? 'selected' : '' ?>>
@@ -209,8 +225,14 @@ tr:last-child td { border-bottom:none; }
                     </option>
                     <?php endforeach; ?>
                 </select>
+                <input type="month" name="month" value="<?= htmlspecialchars($selectedMonth) ?>"
+                    style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;outline:none;cursor:pointer;"
+                    title="Filter by month" onchange="this.form.submit()">
+                <?php if ($selectedMonth): ?>
+                    <a href="?sy_id=<?= $selectedSy ?>" style="font-size:12px;color:#94a3b8;text-decoration:none;white-space:nowrap;">✕ Clear month</a>
+                <?php endif; ?>
             </form>
-            <button class="btn-export" onclick="exportFull()">📥 Excel</button>
+            <button class="btn-export" onclick="exportFull()">📥 Excel<?= $selectedMonth ? ' (filtered)' : '' ?></button>
             <button class="print-btn" onclick="window.print()">🖨 Print</button>
         </div>
     </div>

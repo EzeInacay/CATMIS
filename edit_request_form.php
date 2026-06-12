@@ -263,12 +263,12 @@ tr:last-child td { border-bottom: none; }
 
             <div class="form-field">
                 <label>Requested New Value</label>
-                <input type="text" name="new_value" id="newValue" placeholder="Enter the corrected value" required value="<?= htmlspecialchars($_POST['new_value'] ?? '') ?>">
+                <input type="text" name="new_value" id="newValue" placeholder="Enter the corrected value" required maxlength="100" value="<?= htmlspecialchars($_POST['new_value'] ?? '') ?>">
             </div>
 
             <div class="form-field">
                 <label>Reason for Change <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#94a3b8;">(optional but recommended)</span></label>
-                <textarea name="reason" placeholder="e.g. My name was misspelled during enrollment"><?= htmlspecialchars($_POST['reason'] ?? '') ?></textarea>
+                <textarea name="reason" maxlength="500" placeholder="e.g. My name was misspelled during enrollment"><?= htmlspecialchars($_POST['reason'] ?? '') ?></textarea>
             </div>
 
             <button type="submit" class="btn-submit">Submit Request</button>
@@ -330,6 +330,45 @@ function updateCurrentValue(field) {
     input.placeholder = currentValues[field]
         ? 'Currently: ' + currentValues[field]
         : 'Enter the corrected value';
+}
+
+// ── Character counters ────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function () {
+    const newValueInput = document.getElementById('newValue');
+    const reasonArea    = document.querySelector('textarea[name="reason"]');
+
+    function addCounter(el, max) {
+        const counter = document.createElement('small');
+        counter.style.cssText = 'display:block;text-align:right;color:#94a3b8;font-size:11px;margin-top:3px;';
+        counter.textContent = '0 / ' + max;
+        el.parentNode.insertBefore(counter, el.nextSibling);
+        el.addEventListener('input', () => {
+            counter.textContent = el.value.length + ' / ' + max;
+            counter.style.color = el.value.length >= max ? '#ef4444' : '#94a3b8';
+        });
+    }
+
+    if (newValueInput) addCounter(newValueInput, 100);
+    if (reasonArea)    addCounter(reasonArea, 500);
+
+    // ── Submission popup ─────────────────────────────────────────
+    <?php if (!empty($success)): ?>
+    showSubmitModal();
+    <?php endif; ?>
+});
+
+function showSubmitModal() {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:9999;';
+    overlay.innerHTML = `
+        <div style="background:#fff;border-radius:14px;padding:2rem 2.5rem;max-width:360px;width:90%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.18);">
+            <div style="font-size:2.5rem;margin-bottom:0.5rem;">✅</div>
+            <h3 style="margin:0 0 8px;font-size:18px;color:#0f2027;">Request Submitted</h3>
+            <p style="margin:0 0 1.5rem;color:#64748b;font-size:14px;">Your edit request has been submitted successfully. An admin will review it shortly.</p>
+            <button onclick="this.closest('div').parentNode.remove()" style="background:#0077b6;color:#fff;border:none;border-radius:8px;padding:10px 28px;font-size:14px;font-weight:600;cursor:pointer;">Got it</button>
+        </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', function(e){ if(e.target===overlay) overlay.remove(); });
 }
 </script>
 </body>

@@ -11,7 +11,7 @@ include 'php/mailer.php';
     use PHPMailer\PHPMailer\Exception;
 
 
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'superadmin') {
     header('Location: login.php?role=admin');
     exit;
 }

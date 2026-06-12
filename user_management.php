@@ -4,7 +4,7 @@ include 'php/config.php';
 include 'php/mailer.php';
 include 'php/notify.php';
 
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin','superadmin'])) {
     header('Location: login.php');
     exit;
 }
@@ -22,11 +22,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $role           = trim($_POST['role']           ?? '');
         $raw_password   = $_POST['password']            ?? '';
         $status         = trim($_POST['status']         ?? 'active');
+        $contact_number = trim($_POST['contact_number'] ?? '') ?: null;
+        $address        = trim($_POST['address']        ?? '') ?: null;
 
         if (!$full_name || !$email || !$role || !$raw_password) {
             echo json_encode(['error' => 'Missing required fields.']); exit;
         }
-        if (!in_array($role, ['teacher', 'student'])) {
+        if ($student_number !== null && strlen($student_number) > 12) {
+            echo json_encode(['error' => 'Student number must be at most 12 characters.']); exit;
+        }
+        $allowedRoles = $_SESSION['role'] === 'superadmin'
+            ? ['teacher', 'student', 'admin']
+            : ['teacher', 'student'];
+
+        if (!in_array($role, $allowedRoles)) {
+            if ($role === 'admin') {
+                echo json_encode(['error' => 'Only a super admin can create admin accounts.']); exit;
+            }
             echo json_encode(['error' => 'Invalid role.']); exit;
         }
 
@@ -49,8 +61,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         // Insert into role table
         if ($role === 'student') {
-            $s = $conn->prepare("INSERT INTO students (user_id) VALUES (?)");
-            $s->bind_param('i', $new_id); $s->execute();
+            $s = $conn->prepare("INSERT INTO students (user_id, contact_number, address) VALUES (?, ?, ?)");
+            $s->bind_param('iss', $new_id, $contact_number, $address); $s->execute();
         } elseif ($role === 'teacher') {
             $t = $conn->prepare("INSERT INTO teachers (user_id) VALUES (?)");
             $t->bind_param('i', $new_id); $t->execute();
@@ -78,9 +90,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $student_number = trim($_POST['student_number']  ?? '') ?: null;
         $status         = trim($_POST['status']          ?? 'active');
         $raw_password   = trim($_POST['password']        ?? '');
+        $contact_number = trim($_POST['contact_number']  ?? '') ?: null;
+        $address        = trim($_POST['address']         ?? '') ?: null;
 
         if (!$user_id || !$full_name || !$email) {
             echo json_encode(['error' => 'Missing fields.']); exit;
+        }
+        if ($student_number !== null && strlen($student_number) > 12) {
+            echo json_encode(['error' => 'Student number must be at most 12 characters.']); exit;
         }
 
         if ($raw_password) {
@@ -92,6 +109,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $stmt->bind_param('ssssi', $full_name, $email, $student_number, $status, $user_id);
         }
         $stmt->execute();
+
+        // Update student-specific contact/address (no-op if user isn't a student)
+        $sUpd = $conn->prepare("UPDATE students SET contact_number=?, address=? WHERE user_id=?");
+        $sUpd->bind_param('ssi', $contact_number, $address, $user_id);
+        $sUpd->execute();
 
         $log = $conn->prepare("INSERT INTO audit_logs (user_id, action) VALUES (?, ?)");
         $act = "Updated user account ID #{$user_id}: {$full_name}";
@@ -134,9 +156,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if ($user_id === $_SESSION['user_id']) {
             echo json_encode(['error' => 'You cannot delete your own account.']); exit;
         }
-        $stmt = $conn->prepare("DELETE FROM users WHERE user_id=?");
+        // Soft delete — move to bin. Permanently purged after 30 days.
+        $stmt = $conn->prepare("UPDATE users SET deleted_at = NOW() WHERE user_id=?");
         $stmt->bind_param('i', $user_id);
         $stmt->execute();
+
+        $log = $conn->prepare("INSERT INTO audit_logs (user_id, action) VALUES (?, ?)");
+        $act = "Moved user account ID #{$user_id} to Bin";
+        $log->bind_param('is', $_SESSION['user_id'], $act); $log->execute();
+
+        echo json_encode(['success' => true]); exit;
+    }
+
+    // ── RESTORE ACCOUNT FROM BIN ──────────────────────────────────
+    if ($action === 'restore_user') {
+        $user_id = intval($_POST['user_id'] ?? 0);
+        $stmt = $conn->prepare("UPDATE users SET deleted_at = NULL WHERE user_id=?");
+        $stmt->bind_param('i', $user_id);
+        $stmt->execute();
+
+        $log = $conn->prepare("INSERT INTO audit_logs (user_id, action) VALUES (?, ?)");
+        $act = "Restored user account ID #{$user_id} from Bin";
+        $log->bind_param('is', $_SESSION['user_id'], $act); $log->execute();
+
+        echo json_encode(['success' => true]); exit;
+    }
+
+    // ── PERMANENTLY DELETE FROM BIN ───────────────────────────────
+    if ($action === 'permanent_delete_user') {
+        include __DIR__ . '/php/account_deletion.php';
+
+        $user_id = intval($_POST['user_id'] ?? 0);
+        $raw     = $_POST['confirm_password'] ?? '';
+        $adminRow = $conn->prepare("SELECT password FROM users WHERE user_id=?");
+        $adminRow->bind_param('i', $_SESSION['user_id']); $adminRow->execute();
+        $adminPw  = $adminRow->get_result()->fetch_assoc()['password'];
+        if (!password_verify($raw, $adminPw)) {
+            echo json_encode(['error' => 'Incorrect password.']); exit;
+        }
+        // Only permanently delete accounts that are already in the bin
+        $chk = $conn->prepare("SELECT deleted_at, full_name FROM users WHERE user_id=?");
+        $chk->bind_param('i', $user_id); $chk->execute();
+        $row = $chk->get_result()->fetch_assoc();
+        if (!$row || $row['deleted_at'] === null) {
+            echo json_encode(['error' => 'Account must be in the Bin before permanent deletion.']); exit;
+        }
+
+        $result = purgeUserAccount($conn, $user_id);
+        if (!$result['success']) {
+            echo json_encode(['error' => $result['error']]); exit;
+        }
+
+        // The user row is already gone, so log against the admin performing the action
+        $log = $conn->prepare("INSERT INTO audit_logs (user_id, action) VALUES (?, ?)");
+        $act = "Permanently deleted user account: {$row['full_name']} (ID #{$user_id})";
+        $log->bind_param('is', $_SESSION['user_id'], $act); $log->execute();
+
         echo json_encode(['success' => true]); exit;
     }
 
@@ -277,11 +352,23 @@ $_nRes->bind_param('i', $_uid);
 $_nRes->execute();
 $unreadNotifs = $_nRes->get_result()->fetch_assoc()['cnt'] ?? 0;
 
-// ── Load users ───────────────────────────────────────────────────
+// ── Load users (excluding deleted/bin) ────────────────────────────
 $users = $conn->query("
-    SELECT user_id, student_number, full_name, email, role, status, created_at
+    SELECT u.user_id, u.student_number, u.full_name, u.email, u.role, u.status, u.created_at,
+           s.contact_number, s.address
+    FROM users u
+    LEFT JOIN students s ON s.user_id = u.user_id
+    WHERE u.deleted_at IS NULL
+    ORDER BY u.role ASC, u.full_name ASC
+")->fetch_all(MYSQLI_ASSOC);
+
+// ── Load bin (soft-deleted accounts, auto-purged after 30 days) ───
+$binUsers = $conn->query("
+    SELECT user_id, student_number, full_name, email, role, deleted_at,
+           DATEDIFF(NOW(), deleted_at) AS days_in_bin
     FROM users
-    ORDER BY role ASC, full_name ASC
+    WHERE deleted_at IS NOT NULL
+    ORDER BY deleted_at DESC
 ")->fetch_all(MYSQLI_ASSOC);
 ?>
 <!DOCTYPE html>
@@ -447,7 +534,9 @@ tr:hover td { background: #f8faff; }
         <a href="payment_history.php">📄 Payments</a>
         <a href="audit_logs.php">🕒 Audit Logs</a>
         <a href="financial_report.php">📊 Reports</a>
+        <?php if ($_SESSION['role'] === 'superadmin'): ?>
         <a href="backup.php">💾 Backup</a>
+        <?php endif; ?>
     </div>
     <div class="navbar-right">
         <a href="notifications.php" style="text-decoration:none;position:relative;display:flex;align-items:center;">
@@ -473,11 +562,12 @@ tr:hover td { background: #f8faff; }
             <button class="btn btn-teal" onclick="document.getElementById('importFileInput').click()">📤 Import Excel</button>
             <input type="file" id="importFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleImport(this)">
             <button class="btn btn-primary" onclick="openCreate()">＋ Create Account</button>
+            <button class="btn btn-outline" id="binToggleBtn" onclick="toggleBin()">🗑 Bin (<?= count($binUsers) ?>)</button>
         </div>
     </div>
 
     <!-- Toolbar -->
-    <div class="toolbar">
+    <div class="toolbar" id="mainToolbar">
         <input type="text" class="search-box" id="searchInput" placeholder="🔍 Search name, email, or ID…" oninput="applyFilters()">
         <div class="filter-group">
             <button class="btn btn-outline active-filter" onclick="setFilter('all', this)">All</button>
@@ -489,7 +579,7 @@ tr:hover td { background: #f8faff; }
     </div>
 
     <!-- Table -->
-    <div class="table-wrap">
+    <div class="table-wrap" id="mainTableWrap">
         <table>
             <thead>
                 <tr>
@@ -539,6 +629,49 @@ tr:hover td { background: #f8faff; }
             </tbody>
         </table>
     </div>
+
+    <!-- ===== BIN (soft-deleted accounts) ===== -->
+    <div class="table-wrap" id="binTableWrap" style="display:none;">
+        <div style="padding:12px 16px;background:#fef3c7;color:#92400e;font-size:13px;border-radius:8px;margin-bottom:12px;">
+            ⚠️ Accounts in the Bin are automatically and permanently deleted after <strong>30 days</strong>. You can restore them anytime before then.
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Student No.</th>
+                    <th>Full Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Deleted</th>
+                    <th>Days Remaining</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="binTable">
+            <?php if (empty($binUsers)): ?>
+                <tr class="empty-row"><td colspan="8">Bin is empty.</td></tr>
+            <?php else: ?>
+                <?php foreach ($binUsers as $b): ?>
+                <?php $daysLeft = max(0, 30 - intval($b['days_in_bin'])); ?>
+                <tr id="binrow-<?= $b['user_id'] ?>">
+                    <td><?= $b['user_id'] ?></td>
+                    <td><?= htmlspecialchars($b['student_number'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($b['full_name']) ?></td>
+                    <td><?= htmlspecialchars($b['email']) ?></td>
+                    <td><span class="role-badge role-<?= $b['role'] ?>"><?= ucfirst($b['role']) ?></span></td>
+                    <td><?= date('M d, Y', strtotime($b['deleted_at'])) ?></td>
+                    <td style="<?= $daysLeft <= 5 ? 'color:#dc2626;font-weight:600;' : '' ?>"><?= $daysLeft ?> day<?= $daysLeft === 1 ? '' : 's' ?></td>
+                    <td style="white-space:nowrap;">
+                        <button class="action-btn btn-edit" onclick="restoreUser(<?= $b['user_id'] ?>, '<?= htmlspecialchars(addslashes($b['full_name'])) ?>')">↩️ Restore</button>
+                        <button class="action-btn btn-del" onclick="permanentDeleteUser(<?= $b['user_id'] ?>, '<?= htmlspecialchars(addslashes($b['full_name'])) ?>')">🗑 Delete Forever</button>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
 </div>
 
 <!-- ===== CREATE / EDIT MODAL ===== -->
@@ -548,9 +681,17 @@ tr:hover td { background: #f8faff; }
         <input type="hidden" id="mUserId">
 
         <div class="form-grid">
+            <div class="form-field">
+                <label>First Name</label>
+                <input type="text" id="mFirstName" placeholder="e.g. Juan" maxlength="50">
+            </div>
+            <div class="form-field">
+                <label>Middle Name <span style="font-weight:400;color:#94a3b8;">(optional)</span></label>
+                <input type="text" id="mMiddleName" placeholder="e.g. Santos" maxlength="50">
+            </div>
             <div class="form-field full">
-                <label>Full Name</label>
-                <input type="text" id="mFullName" placeholder="Last, First M.">
+                <label>Last Name</label>
+                <input type="text" id="mLastName" placeholder="e.g. Dela Cruz" maxlength="50">
             </div>
             <div class="form-field">
                 <label>Email</label>
@@ -558,13 +699,16 @@ tr:hover td { background: #f8faff; }
             </div>
             <div class="form-field">
                 <label>Student Number</label>
-                <input type="text" id="mStudentNo" placeholder="2025-00001">
+                <input type="text" id="mStudentNo" placeholder="2025-00001" maxlength="12" pattern="[0-9\-]{1,12}">
             </div>
             <div class="form-field">
                 <label>Role</label>
                 <select id="mRole">
                     <option value="student">Student</option>
                     <option value="teacher">Teacher</option>
+                    <?php if ($_SESSION['role'] === 'superadmin'): ?>
+                    <option value="admin">Admin</option>
+                    <?php endif; ?>
                 </select>
             </div>
             <div class="form-field">
@@ -573,6 +717,14 @@ tr:hover td { background: #f8faff; }
                     <option value="active">Active</option>
                     <option value="inactive">Inactive</option>
                 </select>
+            </div>
+            <div class="form-field">
+                <label>Contact Number <span style="font-weight:400;color:#94a3b8;">(students)</span></label>
+                <input type="text" id="mContactNumber" placeholder="09XXXXXXXXX" maxlength="20">
+            </div>
+            <div class="form-field full">
+                <label>Address <span style="font-weight:400;color:#94a3b8;">(students)</span></label>
+                <input type="text" id="mAddress" placeholder="House No., Street, Barangay, City" maxlength="255">
             </div>
             <div class="form-field full">
                 <label>Password <span id="pwHint" style="font-weight:400;text-transform:none;letter-spacing:0;color:#94a3b8;">(leave blank to keep current)</span></label>
@@ -634,29 +786,44 @@ function applyFilters() {
 function openCreate() {
     document.getElementById('modalTitle').textContent    = 'Create Account';
     document.getElementById('modalSaveBtn').textContent  = 'Create Account';
-    document.getElementById('mUserId').value    = '';
-    document.getElementById('mFullName').value  = '';
-    document.getElementById('mEmail').value     = '';
-    document.getElementById('mStudentNo').value = '';
-    document.getElementById('mRole').value      = 'student';
-    document.getElementById('mStatus').value    = 'active';
-    document.getElementById('mPassword').value  = '';
+    document.getElementById('mUserId').value      = '';
+    document.getElementById('mFirstName').value   = '';
+    document.getElementById('mMiddleName').value  = '';
+    document.getElementById('mLastName').value    = '';
+    document.getElementById('mEmail').value       = '';
+    document.getElementById('mStudentNo').value   = '';
+    document.getElementById('mRole').value        = 'student';
+    document.getElementById('mStatus').value      = 'active';
+    document.getElementById('mContactNumber').value = '';
+    document.getElementById('mAddress').value       = '';
+    document.getElementById('mPassword').value    = '';
     document.getElementById('pwHint').style.display = 'none';
     document.getElementById('mPassword').placeholder   = '••••••••';
     document.getElementById('modalOverlay').classList.add('open');
-    document.getElementById('mFullName').focus();
+    document.getElementById('mFirstName').focus();
 }
 
 function openEdit(user) {
     document.getElementById('modalTitle').textContent    = 'Edit Account';
     document.getElementById('modalSaveBtn').textContent  = 'Save Changes';
-    document.getElementById('mUserId').value    = user.user_id;
-    document.getElementById('mFullName').value  = user.full_name;
-    document.getElementById('mEmail').value     = user.email;
-    document.getElementById('mStudentNo').value = user.student_number || '';
-    document.getElementById('mRole').value      = user.role;
-    document.getElementById('mStatus').value    = user.status;
-    document.getElementById('mPassword').value  = '';
+    document.getElementById('mUserId').value      = user.user_id;
+    // Split stored full_name back into parts for editing
+    // Expected format: "Lastname, Firstname Middlename" or just the full_name as-is
+    const parts = (user.full_name || '').split(',');
+    const lastName  = parts[0] ? parts[0].trim() : '';
+    const rest      = parts[1] ? parts[1].trim().split(' ') : [];
+    const firstName = rest[0] || '';
+    const middleName = rest.slice(1).join(' ');
+    document.getElementById('mFirstName').value   = firstName;
+    document.getElementById('mMiddleName').value  = middleName;
+    document.getElementById('mLastName').value    = lastName;
+    document.getElementById('mEmail').value       = user.email;
+    document.getElementById('mStudentNo').value   = user.student_number || '';
+    document.getElementById('mRole').value        = user.role;
+    document.getElementById('mStatus').value      = user.status;
+    document.getElementById('mContactNumber').value = user.contact_number || '';
+    document.getElementById('mAddress').value       = user.address || '';
+    document.getElementById('mPassword').value    = '';
     document.getElementById('pwHint').style.display = '';
     document.getElementById('mPassword').placeholder   = 'Leave blank to keep current';
     document.getElementById('modalOverlay').classList.add('open');
@@ -668,17 +835,30 @@ function closeModal() {
 
 // ── Save (create or update) ─────────────────────────────────────
 async function saveUser() {
-    const user_id = document.getElementById('mUserId').value;
-    const action  = user_id ? 'update_user' : 'create_user';
+    const user_id    = document.getElementById('mUserId').value;
+    const action     = user_id ? 'update_user' : 'create_user';
+    const firstName  = document.getElementById('mFirstName').value.trim();
+    const middleName = document.getElementById('mMiddleName').value.trim();
+    const lastName   = document.getElementById('mLastName').value.trim();
+
+    if (!firstName || !lastName) {
+        showToast('Error: First name and last name are required.');
+        return;
+    }
+
+    // Compose full_name: "Lastname, Firstname Middlename" (middle optional)
+    const full_name = lastName + ', ' + firstName + (middleName ? ' ' + middleName : '');
 
     const body = new FormData();
     body.append('action',         action);
     body.append('user_id',        user_id);
-    body.append('full_name',      document.getElementById('mFullName').value.trim());
+    body.append('full_name',      full_name);
     body.append('email',          document.getElementById('mEmail').value.trim());
     body.append('student_number', document.getElementById('mStudentNo').value.trim());
     body.append('role',           document.getElementById('mRole').value);
     body.append('status',         document.getElementById('mStatus').value);
+    body.append('contact_number', document.getElementById('mContactNumber').value.trim());
+    body.append('address',        document.getElementById('mAddress').value.trim());
     body.append('password',       document.getElementById('mPassword').value);
 
     const res  = await fetch('user_management.php', { method: 'POST', body });
@@ -767,8 +947,8 @@ async function toggleStatus(user_id) {
 // ── Delete ──────────────────────────────────────────────────────
 async function deleteUser(user_id, name) {
     openPwConfirm(
-        'Delete Account',
-        `You are about to permanently delete "${name}". This cannot be undone.`,
+        'Move to Bin',
+        `"${name}" will be moved to the Bin. It can be restored within 30 days, after which it will be permanently deleted.`,
         async function(pw) {
             const body = new FormData();
             body.append('action',           'delete_user');
@@ -786,8 +966,76 @@ async function deleteUser(user_id, name) {
             }
 
             closePwConfirm();
-            document.getElementById('row-' + user_id)?.remove();
-            showToast('Account deleted.');
+            showToast('Account moved to Bin.');
+            setTimeout(() => location.reload(), 700);
+        }
+    );
+}
+
+// ── Bin: show/hide ────────────────────────────────────────────────
+function toggleBin() {
+    const binWrap   = document.getElementById('binTableWrap');
+    const mainWrap  = document.getElementById('mainTableWrap');
+    const mainTools = document.getElementById('mainToolbar');
+    const btn       = document.getElementById('binToggleBtn');
+    const showingBin = binWrap.style.display !== 'none';
+
+    if (showingBin) {
+        binWrap.style.display  = 'none';
+        mainWrap.style.display = '';
+        mainTools.style.display = '';
+        btn.classList.remove('active-filter');
+    } else {
+        binWrap.style.display  = '';
+        mainWrap.style.display = 'none';
+        mainTools.style.display = 'none';
+        btn.classList.add('active-filter');
+    }
+}
+
+// ── Bin: restore account ────────────────────────────────────────
+async function restoreUser(user_id, name) {
+    if (!confirm(`Restore "${name}" from the Bin?`)) return;
+
+    const body = new FormData();
+    body.append('action',  'restore_user');
+    body.append('user_id', user_id);
+
+    const res  = await fetch('user_management.php', { method: 'POST', body });
+    const data = await res.json();
+
+    if (data.success) {
+        showToast('Account restored.');
+        setTimeout(() => location.reload(), 700);
+    } else {
+        showToast('Error: ' + (data.error || 'Unknown error'));
+    }
+}
+
+// ── Bin: permanently delete account ─────────────────────────────
+async function permanentDeleteUser(user_id, name) {
+    openPwConfirm(
+        'Delete Forever',
+        `"${name}" will be permanently deleted. This cannot be undone.`,
+        async function(pw) {
+            const body = new FormData();
+            body.append('action',           'permanent_delete_user');
+            body.append('user_id',          user_id);
+            body.append('confirm_password', pw);
+
+            const res  = await fetch('user_management.php', { method: 'POST', body });
+            const data = await res.json();
+
+            if (data.error) {
+                const err = document.getElementById('pwConfirmError');
+                err.textContent = data.error;
+                err.style.display = 'block';
+                return;
+            }
+
+            closePwConfirm();
+            document.getElementById('binrow-' + user_id)?.remove();
+            showToast('Account permanently deleted.');
         }
     );
 }

@@ -2,7 +2,7 @@
 session_start();
 include 'php/config.php';
 
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin','superadmin'])) {
     header('Location: login.php');
     exit;
 }
@@ -33,6 +33,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         if (!$grade_group || !$label || !$sy_id) {
             echo json_encode(['error' => 'Missing fields.']); exit;
+        }
+
+        if ($amount < 0) {
+            echo json_encode(['error' => 'Fee amount cannot be negative.']); exit;
         }
 
         if ($fee_id > 0) {
@@ -338,7 +342,9 @@ body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f
         <a href="payment_history.php">📄 Payments</a>
         <a href="audit_logs.php">🕒 Audit Logs</a>
         <a href="financial_report.php">📊 Reports</a>
+        <?php if ($_SESSION['role'] === 'superadmin'): ?>
         <a href="backup.php">💾 Backup</a>
+        <?php endif; ?>
     </div>
     <div class="navbar-right">
         <a href="notifications.php" style="text-decoration:none;position:relative;display:flex;align-items:center;">

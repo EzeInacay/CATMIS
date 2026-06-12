@@ -531,7 +531,7 @@ tr:hover td { background: #f8faff; }
                         ?>
                         <span style="color:<?= $color ?>"><?= $sign ?>₱<?= number_format($entry['amount'], 2) ?></span>
                     </td>
-                    <td style="color:#94a3b8;font-size:13px;"><?= date('M d, Y', strtotime($entry['created_at'])) ?></td>
+                    <td style="color:#94a3b8;font-size:13px;"><?= date('M d, Y g:i A', strtotime($entry['created_at'])) ?></td>
                 </tr>
                 <?php endforeach; ?>
                 <tr class="total-row">
@@ -566,7 +566,7 @@ tr:hover td { background: #f8faff; }
                 <?php foreach ($payments as $p): ?>
                 <?php $mc = 'method-' . str_replace(' ', '-', $p['method']); ?>
                 <tr>
-                    <td><?= date('M d, Y', strtotime($p['payment_date'])) ?></td>
+                    <td><?= date('M d, Y g:i A', strtotime($p['payment_date'])) ?></td>
                     <td class="amount-col">₱<?= number_format($p['amount'], 2) ?></td>
                     <td><span class="method-badge <?= $mc ?>"><?= htmlspecialchars($p['method']) ?></span></td>
                     <td style="font-family:monospace;font-size:13px;"><?= htmlspecialchars($p['or_number']) ?></td>

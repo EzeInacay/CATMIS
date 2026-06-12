@@ -25,6 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             WHERE (email = ? OR student_number = ?)
               AND role IN ('admin','superadmin')
               AND status = 'active'
+              AND deleted_at IS NULL
         ");
         $stmt->bind_param('ss', $identifier, $identifier);
     } else {
@@ -35,6 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             WHERE (email = ? OR student_number = ?)
               AND role IN ('teacher','student')
               AND status = 'active'
+              AND deleted_at IS NULL
         ");
         $stmt->bind_param('ss', $identifier, $identifier);
     }
@@ -56,9 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $log->execute();
 
             // Redirect by role
-            if ($user['role'] === 'superadmin') {
-                header('Location: superadmin_dashboard.php');
-            } elseif ($user['role'] === 'admin') {
+            if ($user['role'] === 'superadmin' || $user['role'] === 'admin') {
                 header('Location: admin_dashboard.php');
             } elseif ($user['role'] === 'teacher') {
                 header('Location: teacher_dashboard.php');
@@ -135,8 +135,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="switch-link">
         <?php if ($mode === 'admin'): ?>
             Not an admin? <a href="login.php">Teacher / Student Login →</a>
-        <?php else: ?>
-            Are you an admin? <a href="login.php?role=admin">Admin Login →</a>
         <?php endif; ?>
     </div>
 

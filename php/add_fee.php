@@ -26,8 +26,8 @@ $amount     = floatval($_POST['amount']     ?? 0);
 $remarks    = trim($_POST['remarks']        ?? 'Additional Fee');
 $posted_by  = $_SESSION['user_id'];
 
-if ($account_id <= 0 || $amount <= 0) {
-    echo json_encode(['error' => 'Invalid account or amount.']);
+if ($account_id <= 0 || $amount <= 0 || $amount < 0) {
+    echo json_encode(['error' => 'Invalid account or amount. Amount must be greater than zero.']);
     exit;
 }
 
