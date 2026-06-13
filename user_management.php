@@ -42,12 +42,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             echo json_encode(['error' => 'Invalid role.']); exit;
         }
 
-        // Check email uniqueness
-        $chk = $conn->prepare("SELECT user_id FROM users WHERE email = ?");
-        $chk->bind_param('s', $email);
+        // Check email/student_number uniqueness
+        if ($student_number !== null) {
+            $chk = $conn->prepare("SELECT user_id, email, student_number FROM users WHERE email = ? OR student_number = ?");
+            $chk->bind_param('ss', $email, $student_number);
+        } else {
+            $chk = $conn->prepare("SELECT user_id, email, student_number FROM users WHERE email = ?");
+            $chk->bind_param('s', $email);
+        }
         $chk->execute();
-        if ($chk->get_result()->num_rows > 0) {
-            echo json_encode(['error' => 'Email already in use.']); exit;
+        $existing = $chk->get_result()->fetch_assoc();
+        if ($existing) {
+            if ($existing['email'] === $email) {
+                echo json_encode(['error' => 'Email already in use.']); exit;
+            }
+            if ($student_number !== null && $existing['student_number'] === $student_number) {
+                echo json_encode(['error' => 'Student number already in use.']); exit;
+            }
         }
 
         $password = password_hash($raw_password, PASSWORD_DEFAULT);
@@ -75,7 +86,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         // Email the new user their credentials (students only — they need to know their ID + password)
         if ($role === 'student' && !empty($email) && !empty($student_number)) {
-            mailAccountCreated($email, $full_name, $student_number, $raw_password);
+            try {
+                mailAccountCreated($email, $full_name, $student_number, $raw_password);
+            } catch (\Throwable $e) {
+                error_log('Mail send failed: ' . $e->getMessage());
+            }
         }
         pushNotification($conn, 'new_account', 'New Account Created', "Account created for {$full_name} ({$role})", 'user_management.php');
 
@@ -98,6 +113,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
         if ($student_number !== null && strlen($student_number) > 12) {
             echo json_encode(['error' => 'Student number must be at most 12 characters.']); exit;
+        }
+
+        // Check email/student_number uniqueness (excluding this user)
+        if ($student_number !== null) {
+            $chk = $conn->prepare("SELECT user_id, email, student_number FROM users WHERE (email = ? OR student_number = ?) AND user_id != ?");
+            $chk->bind_param('ssi', $email, $student_number, $user_id);
+        } else {
+            $chk = $conn->prepare("SELECT user_id, email, student_number FROM users WHERE email = ? AND user_id != ?");
+            $chk->bind_param('si', $email, $user_id);
+        }
+        $chk->execute();
+        $existing = $chk->get_result()->fetch_assoc();
+        if ($existing) {
+            if ($existing['email'] === $email) {
+                echo json_encode(['error' => 'Email already in use.']); exit;
+            }
+            if ($student_number !== null && $existing['student_number'] === $student_number) {
+                echo json_encode(['error' => 'Student number already in use.']); exit;
+            }
         }
 
         if ($raw_password) {
@@ -142,8 +176,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         echo json_encode(['success' => true, 'status' => $newStatus]); exit;
     }
 
-    // DELETE USER
+    // DELETE USER (superadmin only)
     if ($action === 'delete_user') {
+        if ($_SESSION['role'] !== 'superadmin') {
+            echo json_encode(['error' => 'Only a super admin can delete accounts.']); exit;
+        }
         $user_id = intval($_POST['user_id'] ?? 0);
         $raw     = $_POST['confirm_password'] ?? '';
         $adminRow = $conn->prepare("SELECT password FROM users WHERE user_id=?");
@@ -168,8 +205,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         echo json_encode(['success' => true]); exit;
     }
 
-    // ── RESTORE ACCOUNT FROM BIN ──────────────────────────────────
+    // ── RESTORE ACCOUNT FROM BIN (superadmin only) ────────────────
     if ($action === 'restore_user') {
+        if ($_SESSION['role'] !== 'superadmin') {
+            echo json_encode(['error' => 'Only a super admin can restore accounts.']); exit;
+        }
         $user_id = intval($_POST['user_id'] ?? 0);
         $stmt = $conn->prepare("UPDATE users SET deleted_at = NULL WHERE user_id=?");
         $stmt->bind_param('i', $user_id);
@@ -182,8 +222,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         echo json_encode(['success' => true]); exit;
     }
 
-    // ── PERMANENTLY DELETE FROM BIN ───────────────────────────────
+    // ── PERMANENTLY DELETE FROM BIN (superadmin only) ─────────────
     if ($action === 'permanent_delete_user') {
+        if ($_SESSION['role'] !== 'superadmin') {
+            echo json_encode(['error' => 'Only a super admin can permanently delete accounts.']); exit;
+        }
         include __DIR__ . '/php/account_deletion.php';
 
         $user_id = intval($_POST['user_id'] ?? 0);
@@ -325,7 +368,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             // Email student their credentials
             if (!empty($email)) {
-                mailAccountCreated($email, $full_name, $student_number, $raw_password);
+                try {
+                    mailAccountCreated($email, $full_name, $student_number, $raw_password);
+                } catch (\Throwable $e) {
+                    error_log('Mail send failed: ' . $e->getMessage());
+                }
             }
 
             $results[] = [
@@ -562,7 +609,9 @@ tr:hover td { background: #f8faff; }
             <button class="btn btn-teal" onclick="document.getElementById('importFileInput').click()">📤 Import Excel</button>
             <input type="file" id="importFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleImport(this)">
             <button class="btn btn-primary" onclick="openCreate()">＋ Create Account</button>
+            <?php if ($_SESSION['role'] === 'superadmin'): ?>
             <button class="btn btn-outline" id="binToggleBtn" onclick="toggleBin()">🗑 Bin (<?= count($binUsers) ?>)</button>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -619,7 +668,7 @@ tr:hover td { background: #f8faff; }
                         <button class="action-btn btn-toggle" id="toggle-<?= $u['user_id'] ?>" onclick="toggleStatus(<?= $u['user_id'] ?>)">
                             <?= $u['status'] === 'active' ? '🔒 Deactivate' : '✅ Activate' ?>
                         </button>
-                        <?php if ($u['user_id'] !== $_SESSION['user_id']): ?>
+                        <?php if ($u['user_id'] !== $_SESSION['user_id'] && $_SESSION['role'] === 'superadmin'): ?>
                         <button class="action-btn btn-del" onclick="deleteUser(<?= $u['user_id'] ?>, '<?= htmlspecialchars($u['full_name']) ?>')">🗑 Delete</button>
                         <?php endif; ?>
                     </td>
@@ -630,6 +679,7 @@ tr:hover td { background: #f8faff; }
         </table>
     </div>
 
+    <?php if ($_SESSION['role'] === 'superadmin'): ?>
     <!-- ===== BIN (soft-deleted accounts) ===== -->
     <div class="table-wrap" id="binTableWrap" style="display:none;">
         <div style="padding:12px 16px;background:#fef3c7;color:#92400e;font-size:13px;border-radius:8px;margin-bottom:12px;">
@@ -672,6 +722,7 @@ tr:hover td { background: #f8faff; }
             </tbody>
         </table>
     </div>
+    <?php endif; ?>
 </div>
 
 <!-- ===== CREATE / EDIT MODAL ===== -->
@@ -840,36 +891,62 @@ async function saveUser() {
     const firstName  = document.getElementById('mFirstName').value.trim();
     const middleName = document.getElementById('mMiddleName').value.trim();
     const lastName   = document.getElementById('mLastName').value.trim();
+    const email      = document.getElementById('mEmail').value.trim();
+    const role       = document.getElementById('mRole').value;
+    const password   = document.getElementById('mPassword').value;
 
     if (!firstName || !lastName) {
         showToast('Error: First name and last name are required.');
+        return;
+    }
+    if (!email) {
+        showToast('Error: Email is required.');
+        return;
+    }
+    if (!user_id && !password) {
+        showToast('Error: Password is required for new accounts.');
+        return;
+    }
+    const studentNo = document.getElementById('mStudentNo').value.trim();
+    if (studentNo && !/^[0-9\-]{1,12}$/.test(studentNo)) {
+        showToast('Error: Student number must be digits and dashes only (max 12 chars).');
         return;
     }
 
     // Compose full_name: "Lastname, Firstname Middlename" (middle optional)
     const full_name = lastName + ', ' + firstName + (middleName ? ' ' + middleName : '');
 
+    // Confirmation before creating a new account
+    if (!user_id) {
+        const confirmed = confirm(`Create new ${role} account for "${full_name}" (${email})?`);
+        if (!confirmed) return;
+    }
+
     const body = new FormData();
     body.append('action',         action);
     body.append('user_id',        user_id);
     body.append('full_name',      full_name);
-    body.append('email',          document.getElementById('mEmail').value.trim());
+    body.append('email',          email);
     body.append('student_number', document.getElementById('mStudentNo').value.trim());
-    body.append('role',           document.getElementById('mRole').value);
+    body.append('role',           role);
     body.append('status',         document.getElementById('mStatus').value);
     body.append('contact_number', document.getElementById('mContactNumber').value.trim());
     body.append('address',        document.getElementById('mAddress').value.trim());
-    body.append('password',       document.getElementById('mPassword').value);
+    body.append('password',       password);
 
     const res  = await fetch('user_management.php', { method: 'POST', body });
     const data = await res.json();
 
     if (data.success) {
-        showToast(user_id ? 'Account updated!' : 'Account created!');
         closeModal();
-        setTimeout(() => location.reload(), 700);
+        if (user_id) {
+            showToast('✅ Account updated successfully!');
+        } else {
+            showToast(`✅ Account created successfully for ${full_name}!`);
+        }
+        setTimeout(() => location.reload(), 1500);
     } else {
-        showToast('Error: ' + (data.error || 'Unknown error'));
+        showToast('❌ Error: ' + (data.error || 'Unknown error'));
     }
 }
 
