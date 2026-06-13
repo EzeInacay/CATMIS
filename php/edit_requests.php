@@ -3,7 +3,7 @@ session_start();
 include __DIR__ . '/config.php';
 include __DIR__ . '/mailer.php';
 
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin','superadmin'])) {
     http_response_code(403);
     echo json_encode(['error' => 'Unauthorized.']);
     exit;

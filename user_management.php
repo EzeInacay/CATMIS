@@ -2,8 +2,9 @@
 session_start();
 include 'php/config.php';
 include 'php/mailer.php';
+include 'php/notify.php';
 
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin','superadmin'])) {
     header('Location: login.php');
     exit;
 }
@@ -21,20 +22,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $role           = trim($_POST['role']           ?? '');
         $raw_password   = $_POST['password']            ?? '';
         $status         = trim($_POST['status']         ?? 'active');
+        $contact_number = trim($_POST['contact_number'] ?? '') ?: null;
+        $address        = trim($_POST['address']        ?? '') ?: null;
 
         if (!$full_name || !$email || !$role || !$raw_password) {
             echo json_encode(['error' => 'Missing required fields.']); exit;
         }
-        if (!in_array($role, ['admin', 'teacher', 'student'])) {
+        if ($student_number !== null && strlen($student_number) > 12) {
+            echo json_encode(['error' => 'Student number must be at most 12 characters.']); exit;
+        }
+        $allowedRoles = $_SESSION['role'] === 'superadmin'
+            ? ['teacher', 'student', 'admin']
+            : ['teacher', 'student'];
+
+        if (!in_array($role, $allowedRoles)) {
+            if ($role === 'admin') {
+                echo json_encode(['error' => 'Only a super admin can create admin accounts.']); exit;
+            }
             echo json_encode(['error' => 'Invalid role.']); exit;
         }
 
-        // Check email uniqueness
-        $chk = $conn->prepare("SELECT user_id FROM users WHERE email = ?");
-        $chk->bind_param('s', $email);
+        // Check email/student_number uniqueness
+        if ($student_number !== null) {
+            $chk = $conn->prepare("SELECT user_id, email, student_number FROM users WHERE email = ? OR student_number = ?");
+            $chk->bind_param('ss', $email, $student_number);
+        } else {
+            $chk = $conn->prepare("SELECT user_id, email, student_number FROM users WHERE email = ?");
+            $chk->bind_param('s', $email);
+        }
         $chk->execute();
-        if ($chk->get_result()->num_rows > 0) {
-            echo json_encode(['error' => 'Email already in use.']); exit;
+        $existing = $chk->get_result()->fetch_assoc();
+        if ($existing) {
+            if ($existing['email'] === $email) {
+                echo json_encode(['error' => 'Email already in use.']); exit;
+            }
+            if ($student_number !== null && $existing['student_number'] === $student_number) {
+                echo json_encode(['error' => 'Student number already in use.']); exit;
+            }
         }
 
         $password = password_hash($raw_password, PASSWORD_DEFAULT);
@@ -48,8 +72,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         // Insert into role table
         if ($role === 'student') {
-            $s = $conn->prepare("INSERT INTO students (user_id) VALUES (?)");
-            $s->bind_param('i', $new_id); $s->execute();
+            $s = $conn->prepare("INSERT INTO students (user_id, contact_number, address) VALUES (?, ?, ?)");
+            $s->bind_param('iss', $new_id, $contact_number, $address); $s->execute();
         } elseif ($role === 'teacher') {
             $t = $conn->prepare("INSERT INTO teachers (user_id) VALUES (?)");
             $t->bind_param('i', $new_id); $t->execute();
@@ -62,8 +86,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         // Email the new user their credentials (students only — they need to know their ID + password)
         if ($role === 'student' && !empty($email) && !empty($student_number)) {
-            mailAccountCreated($email, $full_name, $student_number, $raw_password);
+            try {
+                mailAccountCreated($email, $full_name, $student_number, $raw_password);
+            } catch (\Throwable $e) {
+                error_log('Mail send failed: ' . $e->getMessage());
+            }
         }
+        pushNotification($conn, 'new_account', 'New Account Created', "Account created for {$full_name} ({$role})", 'user_management.php');
 
         echo json_encode(['success' => true, 'user_id' => $new_id]); exit;
     }
@@ -76,9 +105,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $student_number = trim($_POST['student_number']  ?? '') ?: null;
         $status         = trim($_POST['status']          ?? 'active');
         $raw_password   = trim($_POST['password']        ?? '');
+        $contact_number = trim($_POST['contact_number']  ?? '') ?: null;
+        $address        = trim($_POST['address']         ?? '') ?: null;
 
         if (!$user_id || !$full_name || !$email) {
             echo json_encode(['error' => 'Missing fields.']); exit;
+        }
+        if ($student_number !== null && strlen($student_number) > 12) {
+            echo json_encode(['error' => 'Student number must be at most 12 characters.']); exit;
+        }
+
+        // Check email/student_number uniqueness (excluding this user)
+        if ($student_number !== null) {
+            $chk = $conn->prepare("SELECT user_id, email, student_number FROM users WHERE (email = ? OR student_number = ?) AND user_id != ?");
+            $chk->bind_param('ssi', $email, $student_number, $user_id);
+        } else {
+            $chk = $conn->prepare("SELECT user_id, email, student_number FROM users WHERE email = ? AND user_id != ?");
+            $chk->bind_param('si', $email, $user_id);
+        }
+        $chk->execute();
+        $existing = $chk->get_result()->fetch_assoc();
+        if ($existing) {
+            if ($existing['email'] === $email) {
+                echo json_encode(['error' => 'Email already in use.']); exit;
+            }
+            if ($student_number !== null && $existing['student_number'] === $student_number) {
+                echo json_encode(['error' => 'Student number already in use.']); exit;
+            }
         }
 
         if ($raw_password) {
@@ -91,6 +144,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
         $stmt->execute();
 
+        // Update student-specific contact/address (no-op if user isn't a student)
+        $sUpd = $conn->prepare("UPDATE students SET contact_number=?, address=? WHERE user_id=?");
+        $sUpd->bind_param('ssi', $contact_number, $address, $user_id);
+        $sUpd->execute();
+
         $log = $conn->prepare("INSERT INTO audit_logs (user_id, action) VALUES (?, ?)");
         $act = "Updated user account ID #{$user_id}: {$full_name}";
         $log->bind_param('is', $_SESSION['user_id'], $act); $log->execute();
@@ -100,7 +158,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     // TOGGLE STATUS
     if ($action === 'toggle_status') {
-        $user_id = intval($_POST['user_id'] ?? 0);
+        $user_id  = intval($_POST['user_id'] ?? 0);
+        $raw      = $_POST['confirm_password'] ?? '';
+        $adminRow = $conn->prepare("SELECT password FROM users WHERE user_id=?");
+        $adminRow->bind_param('i', $_SESSION['user_id']); $adminRow->execute();
+        $adminPw  = $adminRow->get_result()->fetch_assoc()['password'];
+        if (!password_verify($raw, $adminPw)) {
+            echo json_encode(['error' => 'Incorrect password.']); exit;
+        }
         $stmt = $conn->prepare("UPDATE users SET status = IF(status='active','inactive','active') WHERE user_id=?");
         $stmt->bind_param('i', $user_id);
         $stmt->execute();
@@ -111,16 +176,85 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         echo json_encode(['success' => true, 'status' => $newStatus]); exit;
     }
 
-    // DELETE USER
+    // DELETE USER (superadmin only)
     if ($action === 'delete_user') {
+        if ($_SESSION['role'] !== 'superadmin') {
+            echo json_encode(['error' => 'Only a super admin can delete accounts.']); exit;
+        }
         $user_id = intval($_POST['user_id'] ?? 0);
+        $raw     = $_POST['confirm_password'] ?? '';
+        $adminRow = $conn->prepare("SELECT password FROM users WHERE user_id=?");
+        $adminRow->bind_param('i', $_SESSION['user_id']); $adminRow->execute();
+        $adminPw  = $adminRow->get_result()->fetch_assoc()['password'];
+        if (!password_verify($raw, $adminPw)) {
+            echo json_encode(['error' => 'Incorrect password.']); exit;
+        }
         // Prevent self-deletion
         if ($user_id === $_SESSION['user_id']) {
             echo json_encode(['error' => 'You cannot delete your own account.']); exit;
         }
-        $stmt = $conn->prepare("DELETE FROM users WHERE user_id=?");
+        // Soft delete — move to bin. Permanently purged after 30 days.
+        $stmt = $conn->prepare("UPDATE users SET deleted_at = NOW() WHERE user_id=?");
         $stmt->bind_param('i', $user_id);
         $stmt->execute();
+
+        $log = $conn->prepare("INSERT INTO audit_logs (user_id, action) VALUES (?, ?)");
+        $act = "Moved user account ID #{$user_id} to Bin";
+        $log->bind_param('is', $_SESSION['user_id'], $act); $log->execute();
+
+        echo json_encode(['success' => true]); exit;
+    }
+
+    // ── RESTORE ACCOUNT FROM BIN (superadmin only) ────────────────
+    if ($action === 'restore_user') {
+        if ($_SESSION['role'] !== 'superadmin') {
+            echo json_encode(['error' => 'Only a super admin can restore accounts.']); exit;
+        }
+        $user_id = intval($_POST['user_id'] ?? 0);
+        $stmt = $conn->prepare("UPDATE users SET deleted_at = NULL WHERE user_id=?");
+        $stmt->bind_param('i', $user_id);
+        $stmt->execute();
+
+        $log = $conn->prepare("INSERT INTO audit_logs (user_id, action) VALUES (?, ?)");
+        $act = "Restored user account ID #{$user_id} from Bin";
+        $log->bind_param('is', $_SESSION['user_id'], $act); $log->execute();
+
+        echo json_encode(['success' => true]); exit;
+    }
+
+    // ── PERMANENTLY DELETE FROM BIN (superadmin only) ─────────────
+    if ($action === 'permanent_delete_user') {
+        if ($_SESSION['role'] !== 'superadmin') {
+            echo json_encode(['error' => 'Only a super admin can permanently delete accounts.']); exit;
+        }
+        include __DIR__ . '/php/account_deletion.php';
+
+        $user_id = intval($_POST['user_id'] ?? 0);
+        $raw     = $_POST['confirm_password'] ?? '';
+        $adminRow = $conn->prepare("SELECT password FROM users WHERE user_id=?");
+        $adminRow->bind_param('i', $_SESSION['user_id']); $adminRow->execute();
+        $adminPw  = $adminRow->get_result()->fetch_assoc()['password'];
+        if (!password_verify($raw, $adminPw)) {
+            echo json_encode(['error' => 'Incorrect password.']); exit;
+        }
+        // Only permanently delete accounts that are already in the bin
+        $chk = $conn->prepare("SELECT deleted_at, full_name FROM users WHERE user_id=?");
+        $chk->bind_param('i', $user_id); $chk->execute();
+        $row = $chk->get_result()->fetch_assoc();
+        if (!$row || $row['deleted_at'] === null) {
+            echo json_encode(['error' => 'Account must be in the Bin before permanent deletion.']); exit;
+        }
+
+        $result = purgeUserAccount($conn, $user_id);
+        if (!$result['success']) {
+            echo json_encode(['error' => $result['error']]); exit;
+        }
+
+        // The user row is already gone, so log against the admin performing the action
+        $log = $conn->prepare("INSERT INTO audit_logs (user_id, action) VALUES (?, ?)");
+        $act = "Permanently deleted user account: {$row['full_name']} (ID #{$user_id})";
+        $log->bind_param('is', $_SESSION['user_id'], $act); $log->execute();
+
         echo json_encode(['success' => true]); exit;
     }
 
@@ -234,7 +368,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             // Email student their credentials
             if (!empty($email)) {
-                mailAccountCreated($email, $full_name, $student_number, $raw_password);
+                try {
+                    mailAccountCreated($email, $full_name, $student_number, $raw_password);
+                } catch (\Throwable $e) {
+                    error_log('Mail send failed: ' . $e->getMessage());
+                }
             }
 
             $results[] = [
@@ -254,11 +392,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     echo json_encode(['error' => 'Unknown action.']); exit;
 }
 
-// ── Load users ───────────────────────────────────────────────────
+// ── Unread notifications count ───────────────────────────────────
+$_uid = $_SESSION['user_id'];
+$_nRes = $conn->prepare("SELECT COUNT(*) AS cnt FROM notifications WHERE admin_id=? AND is_read=0");
+$_nRes->bind_param('i', $_uid);
+$_nRes->execute();
+$unreadNotifs = $_nRes->get_result()->fetch_assoc()['cnt'] ?? 0;
+
+// ── Load users (excluding deleted/bin) ────────────────────────────
 $users = $conn->query("
-    SELECT user_id, student_number, full_name, email, role, status, created_at
+    SELECT u.user_id, u.student_number, u.full_name, u.email, u.role, u.status, u.created_at,
+           s.contact_number, s.address
+    FROM users u
+    LEFT JOIN students s ON s.user_id = u.user_id
+    WHERE u.deleted_at IS NULL
+    ORDER BY u.role ASC, u.full_name ASC
+")->fetch_all(MYSQLI_ASSOC);
+
+// ── Load bin (soft-deleted accounts, auto-purged after 30 days) ───
+$binUsers = $conn->query("
+    SELECT user_id, student_number, full_name, email, role, deleted_at,
+           DATEDIFF(NOW(), deleted_at) AS days_in_bin
     FROM users
-    ORDER BY role ASC, full_name ASC
+    WHERE deleted_at IS NOT NULL
+    ORDER BY deleted_at DESC
 ")->fetch_all(MYSQLI_ASSOC);
 ?>
 <!DOCTYPE html>
@@ -288,7 +445,7 @@ body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f
 }
 .navbar-links a:hover { background: rgba(255,255,255,0.1); color: #fff; }
 .navbar-links a.active { background: rgba(255,255,255,0.15); color: #fff; }
-.navbar-right { margin-left: auto; flex-shrink: 0; }
+.navbar-right { margin-left: auto; flex-shrink: 0; display: flex; align-items: center; gap: 14px; }
 .logout-btn {
     background: #ff3b30; border: none; color: white; padding: 7px 16px;
     border-radius: 6px; cursor: pointer; font-size: 13px;
@@ -423,10 +580,18 @@ tr:hover td { background: #f8faff; }
         <a href="user_management.php" class="active">👥 Users</a>
         <a href="payment_history.php">📄 Payments</a>
         <a href="audit_logs.php">🕒 Audit Logs</a>
-        <a href="edit_requests_admin.php">📝 Edit Requests</a>
-        <a href="#">💾 Backup</a>
+        <a href="financial_report.php">📊 Reports</a>
+        <?php if ($_SESSION['role'] === 'superadmin'): ?>
+        <a href="backup.php">💾 Backup</a>
+        <?php endif; ?>
     </div>
     <div class="navbar-right">
+        <a href="notifications.php" style="text-decoration:none;position:relative;display:flex;align-items:center;">
+            <span style="font-size:20px;">🔔</span>
+            <?php if ($unreadNotifs > 0): ?>
+            <span style="position:absolute;top:-6px;right:-6px;background:#ff3b30;color:white;border-radius:50%;width:18px;height:18px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;"><?= min($unreadNotifs,99) ?></span>
+            <?php endif; ?>
+        </a>
         <button class="logout-btn" onclick="window.location.href='php/logout.php'">Logout</button>
     </div>
 </nav>
@@ -436,15 +601,22 @@ tr:hover td { background: #f8faff; }
     <div class="page-header">
         <h2>👥 User Management</h2>
         <div class="page-header-btns">
+            <a href="edit_requests_admin.php" class="btn btn-outline" id="editReqBtn">📝 Edit Requests<?php
+                $er = $conn->query("SELECT COUNT(*) AS cnt FROM edit_requests WHERE status='pending'")->fetch_assoc();
+                if (($er['cnt'] ?? 0) > 0) echo ' <span style="background:#dc2626;color:white;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;">' . $er['cnt'] . '</span>';
+            ?></a>
             <button class="btn btn-outline" onclick="downloadTemplate()">⬇ Export Template</button>
             <button class="btn btn-teal" onclick="document.getElementById('importFileInput').click()">📤 Import Excel</button>
             <input type="file" id="importFileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleImport(this)">
             <button class="btn btn-primary" onclick="openCreate()">＋ Create Account</button>
+            <?php if ($_SESSION['role'] === 'superadmin'): ?>
+            <button class="btn btn-outline" id="binToggleBtn" onclick="toggleBin()">🗑 Bin (<?= count($binUsers) ?>)</button>
+            <?php endif; ?>
         </div>
     </div>
 
     <!-- Toolbar -->
-    <div class="toolbar">
+    <div class="toolbar" id="mainToolbar">
         <input type="text" class="search-box" id="searchInput" placeholder="🔍 Search name, email, or ID…" oninput="applyFilters()">
         <div class="filter-group">
             <button class="btn btn-outline active-filter" onclick="setFilter('all', this)">All</button>
@@ -456,7 +628,7 @@ tr:hover td { background: #f8faff; }
     </div>
 
     <!-- Table -->
-    <div class="table-wrap">
+    <div class="table-wrap" id="mainTableWrap">
         <table>
             <thead>
                 <tr>
@@ -496,7 +668,7 @@ tr:hover td { background: #f8faff; }
                         <button class="action-btn btn-toggle" id="toggle-<?= $u['user_id'] ?>" onclick="toggleStatus(<?= $u['user_id'] ?>)">
                             <?= $u['status'] === 'active' ? '🔒 Deactivate' : '✅ Activate' ?>
                         </button>
-                        <?php if ($u['user_id'] !== $_SESSION['user_id']): ?>
+                        <?php if ($u['user_id'] !== $_SESSION['user_id'] && $_SESSION['role'] === 'superadmin'): ?>
                         <button class="action-btn btn-del" onclick="deleteUser(<?= $u['user_id'] ?>, '<?= htmlspecialchars($u['full_name']) ?>')">🗑 Delete</button>
                         <?php endif; ?>
                     </td>
@@ -506,6 +678,51 @@ tr:hover td { background: #f8faff; }
             </tbody>
         </table>
     </div>
+
+    <?php if ($_SESSION['role'] === 'superadmin'): ?>
+    <!-- ===== BIN (soft-deleted accounts) ===== -->
+    <div class="table-wrap" id="binTableWrap" style="display:none;">
+        <div style="padding:12px 16px;background:#fef3c7;color:#92400e;font-size:13px;border-radius:8px;margin-bottom:12px;">
+            ⚠️ Accounts in the Bin are automatically and permanently deleted after <strong>30 days</strong>. You can restore them anytime before then.
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Student No.</th>
+                    <th>Full Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Deleted</th>
+                    <th>Days Remaining</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="binTable">
+            <?php if (empty($binUsers)): ?>
+                <tr class="empty-row"><td colspan="8">Bin is empty.</td></tr>
+            <?php else: ?>
+                <?php foreach ($binUsers as $b): ?>
+                <?php $daysLeft = max(0, 30 - intval($b['days_in_bin'])); ?>
+                <tr id="binrow-<?= $b['user_id'] ?>">
+                    <td><?= $b['user_id'] ?></td>
+                    <td><?= htmlspecialchars($b['student_number'] ?? '—') ?></td>
+                    <td><?= htmlspecialchars($b['full_name']) ?></td>
+                    <td><?= htmlspecialchars($b['email']) ?></td>
+                    <td><span class="role-badge role-<?= $b['role'] ?>"><?= ucfirst($b['role']) ?></span></td>
+                    <td><?= date('M d, Y', strtotime($b['deleted_at'])) ?></td>
+                    <td style="<?= $daysLeft <= 5 ? 'color:#dc2626;font-weight:600;' : '' ?>"><?= $daysLeft ?> day<?= $daysLeft === 1 ? '' : 's' ?></td>
+                    <td style="white-space:nowrap;">
+                        <button class="action-btn btn-edit" onclick="restoreUser(<?= $b['user_id'] ?>, '<?= htmlspecialchars(addslashes($b['full_name'])) ?>')">↩️ Restore</button>
+                        <button class="action-btn btn-del" onclick="permanentDeleteUser(<?= $b['user_id'] ?>, '<?= htmlspecialchars(addslashes($b['full_name'])) ?>')">🗑 Delete Forever</button>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php endif; ?>
 </div>
 
 <!-- ===== CREATE / EDIT MODAL ===== -->
@@ -515,9 +732,17 @@ tr:hover td { background: #f8faff; }
         <input type="hidden" id="mUserId">
 
         <div class="form-grid">
+            <div class="form-field">
+                <label>First Name</label>
+                <input type="text" id="mFirstName" placeholder="e.g. Juan" maxlength="50">
+            </div>
+            <div class="form-field">
+                <label>Middle Name <span style="font-weight:400;color:#94a3b8;">(optional)</span></label>
+                <input type="text" id="mMiddleName" placeholder="e.g. Santos" maxlength="50">
+            </div>
             <div class="form-field full">
-                <label>Full Name</label>
-                <input type="text" id="mFullName" placeholder="Last, First M.">
+                <label>Last Name</label>
+                <input type="text" id="mLastName" placeholder="e.g. Dela Cruz" maxlength="50">
             </div>
             <div class="form-field">
                 <label>Email</label>
@@ -525,14 +750,16 @@ tr:hover td { background: #f8faff; }
             </div>
             <div class="form-field">
                 <label>Student Number</label>
-                <input type="text" id="mStudentNo" placeholder="2025-00001">
+                <input type="text" id="mStudentNo" placeholder="2025-00001" maxlength="12" pattern="[0-9\-]{1,12}">
             </div>
             <div class="form-field">
                 <label>Role</label>
                 <select id="mRole">
                     <option value="student">Student</option>
                     <option value="teacher">Teacher</option>
+                    <?php if ($_SESSION['role'] === 'superadmin'): ?>
                     <option value="admin">Admin</option>
+                    <?php endif; ?>
                 </select>
             </div>
             <div class="form-field">
@@ -541,6 +768,14 @@ tr:hover td { background: #f8faff; }
                     <option value="active">Active</option>
                     <option value="inactive">Inactive</option>
                 </select>
+            </div>
+            <div class="form-field">
+                <label>Contact Number <span style="font-weight:400;color:#94a3b8;">(students)</span></label>
+                <input type="text" id="mContactNumber" placeholder="09XXXXXXXXX" maxlength="20">
+            </div>
+            <div class="form-field full">
+                <label>Address <span style="font-weight:400;color:#94a3b8;">(students)</span></label>
+                <input type="text" id="mAddress" placeholder="House No., Street, Barangay, City" maxlength="255">
             </div>
             <div class="form-field full">
                 <label>Password <span id="pwHint" style="font-weight:400;text-transform:none;letter-spacing:0;color:#94a3b8;">(leave blank to keep current)</span></label>
@@ -555,10 +790,28 @@ tr:hover td { background: #f8faff; }
     </div>
 </div>
 
+<!-- ===== PASSWORD CONFIRM MODAL ===== -->
+<div class="modal-overlay" id="pwConfirmOverlay">
+    <div class="modal" style="max-width:380px;">
+        <h3 id="pwConfirmTitle">Confirm Action</h3>
+        <p id="pwConfirmDesc" style="font-size:14px;color:#475569;margin:-10px 0 18px;"></p>
+        <div class="form-field">
+            <label>Your Admin Password</label>
+            <input type="password" id="pwConfirmInput" placeholder="••••••••" autocomplete="current-password">
+            <span id="pwConfirmError" style="color:#dc2626;font-size:12px;margin-top:5px;display:none;"></span>
+        </div>
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="closePwConfirm()">Cancel</button>
+            <button class="btn-save" id="pwConfirmBtn" style="background:#dc2626;">Confirm</button>
+        </div>
+    </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <!-- SheetJS for Excel/CSV parsing -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="js/export_preview_modal.js"></script>
 
 <script>
 // ── Filter state ────────────────────────────────────────────────
@@ -584,29 +837,44 @@ function applyFilters() {
 function openCreate() {
     document.getElementById('modalTitle').textContent    = 'Create Account';
     document.getElementById('modalSaveBtn').textContent  = 'Create Account';
-    document.getElementById('mUserId').value    = '';
-    document.getElementById('mFullName').value  = '';
-    document.getElementById('mEmail').value     = '';
-    document.getElementById('mStudentNo').value = '';
-    document.getElementById('mRole').value      = 'student';
-    document.getElementById('mStatus').value    = 'active';
-    document.getElementById('mPassword').value  = '';
+    document.getElementById('mUserId').value      = '';
+    document.getElementById('mFirstName').value   = '';
+    document.getElementById('mMiddleName').value  = '';
+    document.getElementById('mLastName').value    = '';
+    document.getElementById('mEmail').value       = '';
+    document.getElementById('mStudentNo').value   = '';
+    document.getElementById('mRole').value        = 'student';
+    document.getElementById('mStatus').value      = 'active';
+    document.getElementById('mContactNumber').value = '';
+    document.getElementById('mAddress').value       = '';
+    document.getElementById('mPassword').value    = '';
     document.getElementById('pwHint').style.display = 'none';
     document.getElementById('mPassword').placeholder   = '••••••••';
     document.getElementById('modalOverlay').classList.add('open');
-    document.getElementById('mFullName').focus();
+    document.getElementById('mFirstName').focus();
 }
 
 function openEdit(user) {
     document.getElementById('modalTitle').textContent    = 'Edit Account';
     document.getElementById('modalSaveBtn').textContent  = 'Save Changes';
-    document.getElementById('mUserId').value    = user.user_id;
-    document.getElementById('mFullName').value  = user.full_name;
-    document.getElementById('mEmail').value     = user.email;
-    document.getElementById('mStudentNo').value = user.student_number || '';
-    document.getElementById('mRole').value      = user.role;
-    document.getElementById('mStatus').value    = user.status;
-    document.getElementById('mPassword').value  = '';
+    document.getElementById('mUserId').value      = user.user_id;
+    // Split stored full_name back into parts for editing
+    // Expected format: "Lastname, Firstname Middlename" or just the full_name as-is
+    const parts = (user.full_name || '').split(',');
+    const lastName  = parts[0] ? parts[0].trim() : '';
+    const rest      = parts[1] ? parts[1].trim().split(' ') : [];
+    const firstName = rest[0] || '';
+    const middleName = rest.slice(1).join(' ');
+    document.getElementById('mFirstName').value   = firstName;
+    document.getElementById('mMiddleName').value  = middleName;
+    document.getElementById('mLastName').value    = lastName;
+    document.getElementById('mEmail').value       = user.email;
+    document.getElementById('mStudentNo').value   = user.student_number || '';
+    document.getElementById('mRole').value        = user.role;
+    document.getElementById('mStatus').value      = user.status;
+    document.getElementById('mContactNumber').value = user.contact_number || '';
+    document.getElementById('mAddress').value       = user.address || '';
+    document.getElementById('mPassword').value    = '';
     document.getElementById('pwHint').style.display = '';
     document.getElementById('mPassword').placeholder   = 'Leave blank to keep current';
     document.getElementById('modalOverlay').classList.add('open');
@@ -618,74 +886,240 @@ function closeModal() {
 
 // ── Save (create or update) ─────────────────────────────────────
 async function saveUser() {
-    const user_id = document.getElementById('mUserId').value;
-    const action  = user_id ? 'update_user' : 'create_user';
+    const user_id    = document.getElementById('mUserId').value;
+    const action     = user_id ? 'update_user' : 'create_user';
+    const firstName  = document.getElementById('mFirstName').value.trim();
+    const middleName = document.getElementById('mMiddleName').value.trim();
+    const lastName   = document.getElementById('mLastName').value.trim();
+    const email      = document.getElementById('mEmail').value.trim();
+    const role       = document.getElementById('mRole').value;
+    const password   = document.getElementById('mPassword').value;
+
+    if (!firstName || !lastName) {
+        showToast('Error: First name and last name are required.');
+        return;
+    }
+    if (!email) {
+        showToast('Error: Email is required.');
+        return;
+    }
+    if (!user_id && !password) {
+        showToast('Error: Password is required for new accounts.');
+        return;
+    }
+    const studentNo = document.getElementById('mStudentNo').value.trim();
+    if (studentNo && !/^[0-9\-]{1,12}$/.test(studentNo)) {
+        showToast('Error: Student number must be digits and dashes only (max 12 chars).');
+        return;
+    }
+
+    // Compose full_name: "Lastname, Firstname Middlename" (middle optional)
+    const full_name = lastName + ', ' + firstName + (middleName ? ' ' + middleName : '');
+
+    // Confirmation before creating a new account
+    if (!user_id) {
+        const confirmed = confirm(`Create new ${role} account for "${full_name}" (${email})?`);
+        if (!confirmed) return;
+    }
 
     const body = new FormData();
     body.append('action',         action);
     body.append('user_id',        user_id);
-    body.append('full_name',      document.getElementById('mFullName').value.trim());
-    body.append('email',          document.getElementById('mEmail').value.trim());
+    body.append('full_name',      full_name);
+    body.append('email',          email);
     body.append('student_number', document.getElementById('mStudentNo').value.trim());
-    body.append('role',           document.getElementById('mRole').value);
+    body.append('role',           role);
     body.append('status',         document.getElementById('mStatus').value);
-    body.append('password',       document.getElementById('mPassword').value);
+    body.append('contact_number', document.getElementById('mContactNumber').value.trim());
+    body.append('address',        document.getElementById('mAddress').value.trim());
+    body.append('password',       password);
 
     const res  = await fetch('user_management.php', { method: 'POST', body });
     const data = await res.json();
 
     if (data.success) {
-        showToast(user_id ? 'Account updated!' : 'Account created!');
         closeModal();
+        if (user_id) {
+            showToast('✅ Account updated successfully!');
+        } else {
+            showToast(`✅ Account created successfully for ${full_name}!`);
+        }
+        setTimeout(() => location.reload(), 1500);
+    } else {
+        showToast('❌ Error: ' + (data.error || 'Unknown error'));
+    }
+}
+
+// ── Password Confirm Modal ───────────────────────────────────────
+let _pwCallback = null;
+
+function openPwConfirm(title, desc, callback) {
+    document.getElementById('pwConfirmTitle').textContent  = title;
+    document.getElementById('pwConfirmDesc').textContent   = desc;
+    document.getElementById('pwConfirmInput').value        = '';
+    document.getElementById('pwConfirmError').style.display = 'none';
+    _pwCallback = callback;
+    document.getElementById('pwConfirmOverlay').classList.add('open');
+    setTimeout(() => document.getElementById('pwConfirmInput').focus(), 80);
+}
+
+function closePwConfirm() {
+    document.getElementById('pwConfirmOverlay').classList.remove('open');
+    _pwCallback = null;
+}
+
+document.getElementById('pwConfirmBtn').addEventListener('click', async function () {
+    const pw = document.getElementById('pwConfirmInput').value;
+    if (!pw) {
+        const err = document.getElementById('pwConfirmError');
+        err.textContent = 'Please enter your password.';
+        err.style.display = 'block';
+        return;
+    }
+    if (_pwCallback) await _pwCallback(pw);
+});
+
+document.getElementById('pwConfirmInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') document.getElementById('pwConfirmBtn').click();
+});
+
+document.getElementById('pwConfirmOverlay').addEventListener('click', function(e) {
+    if (e.target === this) closePwConfirm();
+});
+
+// ── Toggle status ───────────────────────────────────────────────
+async function toggleStatus(user_id) {
+    const currentStatus = document.getElementById('status-' + user_id)?.textContent.trim().toLowerCase();
+    const action = currentStatus === 'active' ? 'Deactivate' : 'Activate';
+    openPwConfirm(
+        action + ' Account',
+        `Enter your admin password to ${action.toLowerCase()} this account.`,
+        async function(pw) {
+            const body = new FormData();
+            body.append('action',           'toggle_status');
+            body.append('user_id',          user_id);
+            body.append('confirm_password', pw);
+
+            const res  = await fetch('user_management.php', { method: 'POST', body });
+            const data = await res.json();
+
+            if (data.error) {
+                const err = document.getElementById('pwConfirmError');
+                err.textContent = data.error;
+                err.style.display = 'block';
+                return;
+            }
+
+            closePwConfirm();
+            const newStatus  = data.status;
+            const statusCell = document.getElementById('status-' + user_id);
+            const toggleBtn  = document.getElementById('toggle-' + user_id);
+            statusCell.innerHTML = `<span class="status-badge status-${newStatus}">${newStatus.charAt(0).toUpperCase() + newStatus.slice(1)}</span>`;
+            toggleBtn.textContent = newStatus === 'active' ? '🔒 Deactivate' : '✅ Activate';
+            showToast('Status updated to ' + newStatus + '.');
+        }
+    );
+}
+
+// ── Delete ──────────────────────────────────────────────────────
+async function deleteUser(user_id, name) {
+    openPwConfirm(
+        'Move to Bin',
+        `"${name}" will be moved to the Bin. It can be restored within 30 days, after which it will be permanently deleted.`,
+        async function(pw) {
+            const body = new FormData();
+            body.append('action',           'delete_user');
+            body.append('user_id',          user_id);
+            body.append('confirm_password', pw);
+
+            const res  = await fetch('user_management.php', { method: 'POST', body });
+            const data = await res.json();
+
+            if (data.error) {
+                const err = document.getElementById('pwConfirmError');
+                err.textContent = data.error;
+                err.style.display = 'block';
+                return;
+            }
+
+            closePwConfirm();
+            showToast('Account moved to Bin.');
+            setTimeout(() => location.reload(), 700);
+        }
+    );
+}
+
+// ── Bin: show/hide ────────────────────────────────────────────────
+function toggleBin() {
+    const binWrap   = document.getElementById('binTableWrap');
+    const mainWrap  = document.getElementById('mainTableWrap');
+    const mainTools = document.getElementById('mainToolbar');
+    const btn       = document.getElementById('binToggleBtn');
+    const showingBin = binWrap.style.display !== 'none';
+
+    if (showingBin) {
+        binWrap.style.display  = 'none';
+        mainWrap.style.display = '';
+        mainTools.style.display = '';
+        btn.classList.remove('active-filter');
+    } else {
+        binWrap.style.display  = '';
+        mainWrap.style.display = 'none';
+        mainTools.style.display = 'none';
+        btn.classList.add('active-filter');
+    }
+}
+
+// ── Bin: restore account ────────────────────────────────────────
+async function restoreUser(user_id, name) {
+    if (!confirm(`Restore "${name}" from the Bin?`)) return;
+
+    const body = new FormData();
+    body.append('action',  'restore_user');
+    body.append('user_id', user_id);
+
+    const res  = await fetch('user_management.php', { method: 'POST', body });
+    const data = await res.json();
+
+    if (data.success) {
+        showToast('Account restored.');
         setTimeout(() => location.reload(), 700);
     } else {
         showToast('Error: ' + (data.error || 'Unknown error'));
     }
 }
 
-// ── Toggle status ───────────────────────────────────────────────
-async function toggleStatus(user_id) {
-    const body = new FormData();
-    body.append('action',  'toggle_status');
-    body.append('user_id', user_id);
+// ── Bin: permanently delete account ─────────────────────────────
+async function permanentDeleteUser(user_id, name) {
+    openPwConfirm(
+        'Delete Forever',
+        `"${name}" will be permanently deleted. This cannot be undone.`,
+        async function(pw) {
+            const body = new FormData();
+            body.append('action',           'permanent_delete_user');
+            body.append('user_id',          user_id);
+            body.append('confirm_password', pw);
 
-    const res  = await fetch('user_management.php', { method: 'POST', body });
-    const data = await res.json();
+            const res  = await fetch('user_management.php', { method: 'POST', body });
+            const data = await res.json();
 
-    if (data.success) {
-        const newStatus  = data.status;
-        const statusCell = document.getElementById('status-' + user_id);
-        const toggleBtn  = document.getElementById('toggle-' + user_id);
-        statusCell.innerHTML = `<span class="status-badge status-${newStatus}">${newStatus.charAt(0).toUpperCase() + newStatus.slice(1)}</span>`;
-        toggleBtn.textContent = newStatus === 'active' ? '🔒 Deactivate' : '✅ Activate';
-        showToast('Status updated to ' + newStatus + '.');
-    } else {
-        showToast('Could not update status.');
-    }
-}
+            if (data.error) {
+                const err = document.getElementById('pwConfirmError');
+                err.textContent = data.error;
+                err.style.display = 'block';
+                return;
+            }
 
-// ── Delete ──────────────────────────────────────────────────────
-async function deleteUser(user_id, name) {
-    if (!confirm(`Delete account for "${name}"? This cannot be undone.`)) return;
-
-    const body = new FormData();
-    body.append('action',  'delete_user');
-    body.append('user_id', user_id);
-
-    const res  = await fetch('user_management.php', { method: 'POST', body });
-    const data = await res.json();
-
-    if (data.success) {
-        document.getElementById('row-' + user_id)?.remove();
-        showToast('Account deleted.');
-    } else {
-        showToast('Error: ' + (data.error || 'Could not delete.'));
-    }
+            closePwConfirm();
+            document.getElementById('binrow-' + user_id)?.remove();
+            showToast('Account permanently deleted.');
+        }
+    );
 }
 
 // ── Export current table to CSV ─────────────────────────────────
 function exportExcel() {
-    const rows  = [['ID', 'Student No.', 'Full Name', 'Email', 'Role', 'Status', 'Created']];
+    const rows = [['ID', 'Student No.', 'Full Name', 'Email', 'Role', 'Status', 'Created']];
     document.querySelectorAll('#userTable tr[data-role]').forEach(row => {
         if (row.style.display === 'none') return;
         const cells = row.querySelectorAll('td');
@@ -699,27 +1133,66 @@ function exportExcel() {
             cells[6].textContent.trim(),
         ]);
     });
-    const csv  = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const link = document.createElement('a');
-    link.href     = URL.createObjectURL(blob);
-    link.download = `CATMIS_Users_${new Date().toISOString().slice(0,10)}.csv`;
-    link.click();
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{wch:6},{wch:14},{wch:28},{wch:32},{wch:10},{wch:10},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws, 'Users');
+    previewAndExport(wb, `CATMIS_Users_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
-
-// ── Download blank import template ──────────────────────────────
+// ── Download import template (Excel with Instructions sheet) ─────
 function downloadTemplate() {
-    const csv = [
-        'student_number,full_name,email,grade_level,section,strand',
-        '2025-00011,Dela Cruz Juan A.,juan.delacruz@catmis.edu.ph,11,STEM-A,STEM',
-        '2025-00012,Santos Maria B.,maria.santos@catmis.edu.ph,7,Mabini,',
-        '2025-00013,Reyes Carlo D.,carlo.reyes@catmis.edu.ph,10,Emerald,',
-    ].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const link = document.createElement('a');
-    link.href     = URL.createObjectURL(blob);
-    link.download = 'CATMIS_Student_Import_Template.csv';
-    link.click();
+    if (typeof XLSX === 'undefined') {
+        alert('Excel library not loaded yet. Please wait a moment and try again.');
+        return;
+    }
+
+    const wb = XLSX.utils.book_new();
+
+    // ── Sheet 1: Import Data (fill this in) ──────────────────────
+    const dataRows = [
+        // Header row
+        ['student_number', 'full_name', 'email', 'grade_level', 'section', 'strand'],
+        // Sample rows
+        ['2025-00011', 'Dela Cruz, Juan A.', 'juan.delacruz@catmis.edu.ph', '11', 'STEM-A', 'STEM'],
+        ['2025-00012', 'Santos, Maria B.',   'maria.santos@catmis.edu.ph',   '7',  'Mabini', ''],
+        ['2025-00013', 'Reyes, Carlo D.',    'carlo.reyes@catmis.edu.ph',    '10', 'Emerald',''],
+    ];
+    const ws1 = XLSX.utils.aoa_to_sheet(dataRows);
+    ws1['!cols'] = [
+        {wch:16}, {wch:28}, {wch:32}, {wch:12}, {wch:16}, {wch:12}
+    ];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Import Data');
+
+    // ── Sheet 2: Instructions ─────────────────────────────────────
+    const instructions = [
+        ['CATMIS Student Import Template — Instructions'],
+        [''],
+        ['COLUMN', 'REQUIRED?', 'FORMAT / NOTES'],
+        ['student_number', 'Yes', 'Unique student ID. e.g. 2025-00001'],
+        ['full_name',      'Yes', 'Last, First M. — use comma format'],
+        ['email',          'Yes', 'Must be unique. e.g. s00001@catmis.edu.ph'],
+        ['grade_level',    'Yes', 'Number only: 1 to 12'],
+        ['section',        'Yes', 'Must match an existing section name exactly. e.g. Mabini, STEM-A'],
+        ['strand',         'SHS only', 'Required for Grades 11-12. One of: STEM, ABM, HUMSS'],
+        [''],
+        ['IMPORTANT NOTES'],
+        ['• Do NOT change the column headers in row 1.'],
+        ['• Delete the 3 sample rows before importing.'],
+        ['• Students are assigned tuition automatically based on their grade and section.'],
+        ['• A random temporary password is generated and emailed to each student.'],
+        ['• Duplicate student_number or email entries will be skipped.'],
+        ['• Strand column can be left blank for Grades 1-10.'],
+        [''],
+        ['VALID STRANDS (Grade 11-12 only)'],
+        ['STEM', '— Science, Technology, Engineering and Mathematics'],
+        ['ABM',  '— Accountancy, Business and Management'],
+        ['HUMSS','— Humanities and Social Sciences'],
+    ];
+    const ws2 = XLSX.utils.aoa_to_sheet(instructions);
+    ws2['!cols'] = [{wch:20}, {wch:14}, {wch:55}];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Instructions');
+
+    previewAndExport(wb, 'CATMIS_Student_Import_Template.xlsx');
 }
 
 // ── Handle imported file (Excel or CSV) ────────────────────────

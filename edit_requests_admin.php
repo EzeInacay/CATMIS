@@ -2,10 +2,18 @@
 session_start();
 include 'php/config.php';
 
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin','superadmin'])) {
     header('Location: login.php');
     exit;
 }
+
+// Unread notifications count
+$_uid = $_SESSION['user_id'];
+$_nRes = $conn->prepare("SELECT COUNT(*) AS cnt FROM notifications WHERE admin_id=? AND is_read=0");
+$_nRes->bind_param('i', $_uid);
+$_nRes->execute();
+$unreadNotifs = $_nRes->get_result()->fetch_assoc()['cnt'] ?? 0;
+
 
 // ── Load all requests ────────────────────────────────────────────
 $requests = $conn->query("
@@ -59,7 +67,7 @@ body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f
 .navbar-links a { color: rgba(255,255,255,0.7); text-decoration: none; padding: 8px 13px; border-radius: 6px; font-size: 13.5px; white-space: nowrap; transition: background 0.18s, color 0.18s; }
 .navbar-links a:hover { background: rgba(255,255,255,0.1); color: #fff; }
 .navbar-links a.active { background: rgba(255,255,255,0.15); color: #fff; }
-.navbar-right { margin-left: auto; flex-shrink: 0; }
+.navbar-right { margin-left: auto; flex-shrink: 0; display: flex; align-items: center; gap: 14px; }
 .logout-btn { background: #ff3b30; border: none; color: white; padding: 7px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-family: inherit; }
 .logout-btn:hover { background: #d0302a; }
 
@@ -129,10 +137,18 @@ tr:hover td { background: #f8faff; }
         <a href="user_management.php">👥 Users</a>
         <a href="payment_history.php">📄 Payments</a>
         <a href="audit_logs.php">🕒 Audit Logs</a>
-        <a href="edit_requests_admin.php" class="active">📝 Edit Requests</a>
-        <a href="#">💾 Backup</a>
+        <a href="financial_report.php">📊 Reports</a>
+        <?php if ($_SESSION['role'] === 'superadmin'): ?>
+        <a href="backup.php">💾 Backup</a>
+        <?php endif; ?>
     </div>
     <div class="navbar-right">
+        <a href="notifications.php" style="text-decoration:none;position:relative;display:flex;align-items:center;">
+            <span style="font-size:20px;">🔔</span>
+            <?php if ($unreadNotifs > 0): ?>
+            <span style="position:absolute;top:-6px;right:-6px;background:#ff3b30;color:white;border-radius:50%;width:18px;height:18px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;"><?= min($unreadNotifs,99) ?></span>
+            <?php endif; ?>
+        </a>
         <button class="logout-btn" onclick="window.location.href='php/logout.php'">Logout</button>
     </div>
 </nav>

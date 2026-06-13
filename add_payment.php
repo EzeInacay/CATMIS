@@ -11,6 +11,7 @@ session_start();
 include 'php/config.php';
 include 'php/get_balance.php';
 include 'php/mailer.php';
+include 'php/notify.php';
 
 // ── Auth guard ───────────────────────────────────────────────────
 if (!isset($_SESSION['user_id'])) {
@@ -86,6 +87,10 @@ try {
     $studentInfo->execute();
     $info = $studentInfo->get_result()->fetch_assoc();
 
+    // Push in-app notification
+    $notifMsg = ($info['full_name'] ?? 'A student') . ' paid ₱' . number_format($amount,2) . ' via ' . $method . ' (OR#' . $or_number . ')';
+    pushNotification($conn, 'payment', 'Payment Posted', $notifMsg, 'payment_history.php');
+
     if ($info && $info['email']) {
         $remainingBalance = getBalance($conn, $account_id);
         mailPaymentPosted(
@@ -98,7 +103,10 @@ try {
         );
     }
 
-    header("Location: payment_form.php?account_id={$account_id}&success=1");
+    $redirect_or     = urlencode($or_number);
+    $redirect_amount = urlencode(number_format($amount, 2));
+    $redirect_method = urlencode($method);
+    header("Location: payment_form.php?account_id={$account_id}&success=1&or={$redirect_or}&amt={$redirect_amount}&mth={$redirect_method}");
 
 } catch (Exception $e) {
     $conn->rollback();

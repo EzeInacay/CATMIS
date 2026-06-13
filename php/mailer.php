@@ -1,6 +1,14 @@
 <?php
 /**
- * mailer.php — Reusable email sender using PHPMailers
+ * mailer.php — Reusable email sender using PHPMailer
+ *
+ * INSTALLATION (run once in your project root via terminal):
+ *   composer require phpmailer/phpmailer
+ *
+ * If you don't have Composer:
+ *   1. Download from https://getcomposer.org/download/
+ *   2. Run: php composer.phar require phpmailer/phpmailer
+ *
  * Usage:
  *   include 'mailer.php';
  *   sendMail('student@email.com', 'Subject here', '<p>HTML body here</p>');

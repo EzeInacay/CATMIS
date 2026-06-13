@@ -203,6 +203,11 @@ if (isset($_GET['ledger_for'])) {
     <!-- Toolbar -->
     <div class="toolbar">
         <input type="text" class="search-box" id="searchInput" placeholder="🔍 Search student name or ID…" oninput="applyFilters()">
+        <select id="statusFilter" onchange="applyFilters()" style="padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;background:white;cursor:pointer;outline:none;">
+            <option value="all">All Statuses</option>
+            <option value="paid">Paid</option>
+            <option value="pending">Pending</option>
+        </select>
         <button class="btn-export" onclick="exportExcel()">📥 Export Excel</button>
     </div>
 
@@ -228,6 +233,7 @@ if (isset($_GET['ledger_for'])) {
                 <tr
                     data-section="<?= $s['section_id'] ?>"
                     data-search="<?= htmlspecialchars(strtolower($s['full_name'] . ' ' . ($s['student_number'] ?? ''))) ?>"
+                    data-status="<?= strtolower($s['status']) ?>"
                 >
                     <td><?= htmlspecialchars($s['student_number'] ?? '—') ?></td>
                     <td><?= htmlspecialchars($s['full_name']) ?></td>
@@ -289,11 +295,13 @@ function switchSection(secId, btn) {
 }
 
 function applyFilters() {
-    const q = document.getElementById('searchInput').value.toLowerCase();
+    const q      = document.getElementById('searchInput').value.toLowerCase();
+    const status = document.getElementById('statusFilter').value;
     allRows.forEach(row => {
         const secOk    = currentSection === 'all' || row.dataset.section === currentSection;
         const searchOk = !q || row.dataset.search.includes(q);
-        row.style.display = secOk && searchOk ? '' : 'none';
+        const statusOk = status === 'all' || row.dataset.status === status;
+        row.style.display = secOk && searchOk && statusOk ? '' : 'none';
     });
 }
 
@@ -312,7 +320,7 @@ async function viewLedger(accountId, name) {
     }
 
     const typeColors = {
-        CHARGE: 'entry-CHARGE', PAYMENT: 'entry-PAYMENT',
+        CHARGE: 'entry-CHARGE', FEE: 'entry-CHARGE', PAYMENT: 'entry-PAYMENT',
         DISCOUNT: 'entry-DISCOUNT', PENALTY: 'entry-PENALTY', ADJUSTMENT: 'entry-ADJUSTMENT'
     };
 
@@ -326,7 +334,7 @@ async function viewLedger(accountId, name) {
         html += `<tr>
             <td style="color:#94a3b8;font-size:12px;white-space:nowrap;">${date}</td>
             <td>${desc}</td>
-            <td><span class="entry-badge ${typeColors[e.entry_type] || ''}">${e.entry_type}</span></td>
+            <td><span class="entry-badge ${typeColors[e.entry_type] || ''}">${e.entry_type === 'CHARGE' ? 'FEE' : e.entry_type}</span></td>
             <td style="text-align:right;color:${color}">${sign}₱${parseFloat(e.amount).toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
             <td style="text-align:right;font-weight:600;">₱${parseFloat(e.running).toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
         </tr>`;
@@ -354,8 +362,9 @@ function exportExcel() {
     const ws = XLSX.utils.aoa_to_sheet(data);
     ws['!cols'] = [{wch:14},{wch:28},{wch:8},{wch:16},{wch:14},{wch:10}];
     XLSX.utils.book_append_sheet(wb, ws, 'My Students');
-    XLSX.writeFile(wb, `CATMIS_MyStudents_${new Date().toISOString().slice(0,10)}.xlsx`);
+    previewAndExport(wb, `CATMIS_MyStudents_${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 </script>
+<script src="js/export_preview_modal.js"></script>
 </body>
 </html>
